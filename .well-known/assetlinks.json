@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "io.github.clayscore.twa",
+        "sha256_cert_fingerprints": ["91:8E:A4:7C:5D:58:46:E7:83:9E:83:38:05:73:97:90:AC:25:08:73:54:34:25:61:8D:1B:E5:1B:71:0B:1C:4C"]
+      }
+    }]
