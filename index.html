@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sarge Sporting Pro</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="https://img.icons8.com/ios-filled/512/target.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+    <style>
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        input, select, textarea { font-size: 16px !important; }
+        @media print {
+            .no-print { display: none !important; }
+            body {
+                background-color: white !important; padding: 0 !important; margin: 5mm !important;
+                font-family: "Courier New", Courier, monospace; color: black !important;
+            }
+            .print-only { display: block !important; }
+            table { width: 100% !important; border-collapse: collapse !important; border: 1.5pt solid black !important; table-layout: fixed; }
+            th, td {
+                border: 0.5pt solid black !important; padding: 0 !important; color: black !important;
+                text-align: center !important; vertical-align: middle !important; overflow: hidden;
+                height: 30px;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            .print-header {
+                display: flex; justify-content: space-between; align-items: center;
+                border-bottom: 2pt solid black; padding-bottom: 8pt; margin-bottom: 12pt; font-size: 13pt;
+            }
+            .print-notes {
+                margin-top: 12pt; font-size: 10pt; border: 0.75pt solid black;
+                padding: 6pt; min-height: 28pt; text-align: left;
+            }
+            .signature-section { margin-top: 24pt; display: flex; justify-content: flex-end; }
+            .sig-line {
+                border-top: 1pt solid black; width: 260pt; text-align: center;
+                padding-top: 6pt; font-size: 9pt; font-weight: bold;
+            }
+        }
+        #capture-container {
+            position: absolute; left: -9999px; top: 0; width: 1200px; background: white; padding: 40px; color: black; font-family: "Courier New", Courier, monospace;
+        }
+        #capture-container table { width: 100%; border-collapse: collapse; border: 2pt solid black; table-layout: fixed; }
+        #capture-container th, #capture-container td { border: 1pt solid black; padding: 0; text-align: center !important; vertical-align: middle !important; }
+        .cell-center { display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; text-align: center; }
+        .hit-bg { background-color: #16a34a !important; color: white !important; border-color: #15803d !important; }
+        .hit2-bg { background-color: #65a30d !important; color: white !important; border-color: #4d7c0f !important; }
+        .miss-bg { background-color: #ef4444 !important; color: white !important; border-color: #b91c1c !important; }
+        .first-up-highlight { animation: lead-pulse 2s infinite; border: 2px solid #f97316 !important; }
+        @keyframes lead-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(249, 115, 22, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0); }
+        }
+        .chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 9999px; font-size: 9px; font-weight: 900; text-transform: uppercase; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; white-space: nowrap; }
+        .chip.active { background: #0f172a; color: white; border-color: #0f172a; }
+        .chip.miss-active { background: #ef4444; color: white; border-color: #b91c1c; }
+        .bar-track { background: #f1f5f9; border-radius: 6px; overflow: hidden; height: 10px; width: 100%; }
+        .bar-fill { background: #f97316; height: 100%; border-radius: 6px; }
+        .navbtn { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 8px; font-weight: 900; text-transform: uppercase; color: #94a3b8; padding: 6px 4px; border-radius: 10px; flex: 1; }
+        .navbtn.active { color: #f97316; background: #1e293b; }
+        .hidden-view { display: none !important; }
+        /* Glove mode: scales up every tappable/readable element on the scoring
+           screen (buttons, target cards, dropdowns, stand nav) for shooting in
+           gloves or cold weather. Scoped by a `glove-mode` class toggled on
+           <body> in render(), so it applies wherever the scoring screen's own
+           markup carries these hooks - no ternary classes scattered through
+           every template string, just these overrides plus the class hooks. */
+        body.glove-mode .glove-standnav { width: 64px !important; height: 64px !important; font-size: 16px !important; }
+        body.glove-mode .glove-target-card { padding: 14px !important; min-width: 150px !important; }
+        body.glove-mode .glove-target-label { font-size: 11px !important; line-height: 1.5 !important; }
+        body.glove-mode .glove-hitmiss-btn { height: 60px !important; font-size: 16px !important; }
+        body.glove-mode .glove-missreason-chip { font-size: 13px !important; padding: 8px 14px !important; }
+        body.glove-mode .glove-choke-select { font-size: 14px !important; padding: 10px !important; }
+        body.glove-mode .glove-shooter-name { font-size: 16px !important; max-width: 160px !important; }
+        body.glove-mode .glove-count { font-size: 24px !important; }
+        body.glove-mode .glove-nav-btn { padding: 20px !important; font-size: 15px !important; }
+        body.glove-mode .glove-edit-btn { font-size: 13px !important; padding: 10px 16px !important; }
+        body.glove-mode .glove-stand-title { font-size: 24px !important; }
+        body.glove-mode .glove-tag-select { font-size: 14px !important; padding: 12px !important; }
+        body.glove-mode .glove-repeat-input { width: 56px !important; font-size: 14px !important; padding: 10px !important; }
+        body.glove-mode .glove-pairtype-btn { font-size: 12px !important; padding: 10px 14px !important; }
+        body.glove-mode .glove-header-btn { padding: 12px !important; }
+        body.glove-mode .glove-header-btn i { width: 20px !important; height: 20px !important; }
+        /* Sitewide glove-mode rules (2026-07-14): the hooks above were tuned
+           specifically for the dense scoring screen. Paul asked for glove mode
+           to apply everywhere, not just scoring - Home, Shooters, History,
+           Round Detail, Analysis, Settings, and the New Round wizard all use
+           plain <button>/<select>/<input>/.chip/.navbtn elements without
+           per-element hooks, so rather than hand-tagging every one of them,
+           these generic selectors bump touch targets across the whole app.
+           Specificity note: "body.glove-mode .some-class" (two classes) always
+           beats "body.glove-mode button" (class + tag) regardless of source
+           order, so these generic rules can never override the more tailored
+           scoring-screen hooks above - safe to combine both. */
+        body.glove-mode button { min-height: 42px !important; padding: 10px 14px !important; font-size: 12px !important; }
+        body.glove-mode button i, body.glove-mode button svg { min-width: 16px !important; min-height: 16px !important; }
+        body.glove-mode input, body.glove-mode select, body.glove-mode textarea { font-size: 15px !important; padding: 10px !important; }
+        body.glove-mode .chip { font-size: 11px !important; padding: 8px 12px !important; }
+        body.glove-mode .navbtn { padding: 10px 4px !important; font-size: 10px !important; }
+        body.glove-mode .navbtn i, body.glove-mode .navbtn svg { width: 20px !important; height: 20px !important; }
+        body.glove-mode #header-actions button { padding: 12px !important; }
+        body.glove-mode #header-actions i, body.glove-mode #header-actions svg { width: 20px !important; height: 20px !important; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans pb-24 overflow-x-hidden">
+    <header class="bg-slate-900 text-white sticky top-0 z-50 shadow-md no-print w-full">
+        <div class="max-w-5xl mx-auto p-3 flex justify-between items-center">
+            <div class="flex items-center gap-2 cursor-pointer" onclick="goHome()">
+                <div class="w-8 h-8 flex items-center justify-center bg-orange-500 rounded-lg shadow-sm">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6">
+                        <circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold tracking-tight uppercase italic leading-none">Sporting Pro</h1>
+                    <span class="text-[7px] text-green-400 font-bold uppercase flex items-center gap-1 mt-0.5"><i data-lucide="wifi-off" size="7"></i> Offline Ready</span>
+                </div>
+            </div>
+            <div id="header-actions" class="flex items-center gap-1.5"></div>
+        </div>
+        <div class="w-full bg-slate-800 h-1"><div id="progress-bar" class="bg-orange-500 h-full transition-all duration-500 w-0"></div></div>
+    </header>
+
+    <nav class="max-w-5xl mx-auto flex gap-1 px-2 pt-2 no-print" id="main-nav"></nav>
+
+    <main id="app-container" class="max-w-5xl mx-auto p-2 space-y-3 transition-opacity duration-300 no-print"></main>
+
+    <!-- Export scaffolding (hidden, used for image/PDF export) -->
+    <div id="capture-container" class="no-print">
+        <div style="border-bottom: 2pt solid black; padding: 10px 0; margin-bottom: 15px; display: flex; justify-content: space-between; font-size: 14pt;">
+            <div><strong>GROUND:</strong> <span id="cap-ground"></span></div>
+            <div style="text-align:center; text-transform: uppercase;"><strong>Sporting Score Leaderboard</strong></div>
+            <div><strong>DATE:</strong> <span id="cap-date"></span></div>
+        </div>
+        <table id="cap-grid"></table>
+        <div style="margin-top: 30px; display: flex; justify-content: space-between; align-items: center; font-size: 11pt; font-weight: bold;">
+            <span>Generated by Sarge</span>
+            <div style="border-top: 1.5pt solid black; width: 300px; text-align: center; padding-top: 8px;">SCORER / SHOOTER SIGNATURE</div>
+        </div>
+    </div>
+    <div class="hidden print-only" id="print-view">
+        <div class="print-header">
+            <div><strong>GROUND:</strong> <span id="p-ground"></span></div>
+            <div style="text-align:center; text-transform: uppercase;"><strong>Official Scorecard</strong></div>
+            <div style="text-align:right"><strong>DATE:</strong> <span id="p-date"></span></div>
+        </div>
+        <table id="p-grid"></table>
+        <div class="print-notes"><strong>NOTES:</strong> <span id="p-notes"></span></div>
+        <div class="signature-section"><div class="sig-line">SIGNATURE</div></div>
+        <div style="text-align: center; margin-top: 20px; font-size: 8pt; font-weight: bold; color: #666;">Generated by Sarge</div>
+    </div>
+    <input type="file" id="import-file-input" accept="application/json" class="hidden" onchange="handleImportFile(this.files[0])">
+
+    <script>
+    /* =========================================================================================
+       DATA LAYER
+    ========================================================================================= */
+    const DB_KEY = 'sarge_pwa_pro_v3';
+    let idCounter = 0;
+    function newId() { return `${Date.now()}_${idCounter++}`; }
+
+    function defaultPresets() {
+        return {
+            clayTypes: ['Standard', 'Midi', 'Mini', 'Battue', 'Rabbit', 'Flash/Zap', 'Ballistic'],
+            presentations: ['Crosser (L→R)', 'Crosser (R→L)', 'Incomer', 'Outgoer/Going Away', 'Quartering In', 'Quartering Away', 'Springing Teal', 'Looper', 'Dropper', 'Driven', 'Overhead'],
+            missReasons: ['Behind', 'In front', 'Above', 'Below', "Didn't mount", 'Lost sight of it'],
+            windOptions: ['Calm', 'Breezy', 'Windy'],
+            lightOptions: ['Bright', 'Overcast', 'Flat/Dull'],
+            chokes: ['Cylinder', 'Skeet', 'Quarter (1/4)', 'Half (1/2)', 'Three-Quarter (3/4)', 'Full'],
+            cartridges: ['21g Fibre 7s', '24g Fibre 7.5s', '28g Fibre 8s'],
+            distanceBands: ['Very Close', 'Close', 'Medium', 'Far', 'Very Far'],
+            pairTypes: [ {key:'single', label:'Single'}, {key:'simo', label:'Simo Pair'}, {key:'onreport', label:'On-Report Pair'}, {key:'following', label:'Following Pair'} ]
+        };
+    }
+    function defaultDB() {
+        return { profiles: [], presets: defaultPresets(), history: [], activeRound: null, view: 'home', analysisShooterId: null, historyRoundId: null, avgWindow: 6, gloveMode: false };
+    }
+    let db = defaultDB();
+    // Glove mode scales up buttons/cards/dropdowns on the scoring screen for
+    // shooting in gloves/cold weather. A single boolean toggled from Settings
+    // or the quick-access icon in the scoring header; applied via a `glove-mode`
+    // class on <body> (set in render()) rather than per-view state, so it
+    // survives navigation and CSS in the <style> block handles the sizing.
+    function toggleGloveMode() { db.gloveMode = !db.gloveMode; saveDB(); render(); }
+    function saveDB() { try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch (e) {} }
+    function loadDB() {
+        const s = localStorage.getItem(DB_KEY);
+        if (s) {
+            try {
+                const parsed = JSON.parse(s);
+                db = Object.assign(defaultDB(), parsed);
+                db.presets = Object.assign(defaultPresets(), db.presets || {});
+                // Migration: make sure newly-added default presentation options show up
+                // even for a save file whose presentations array predates them.
+                ['Driven', 'Overhead'].forEach(v => { if (!db.presets.presentations.includes(v)) db.presets.presentations.push(v); });
+                return true;
+            } catch (e) {}
+        }
+        return false;
+    }
+    function newRound() {
+        return {
+            id: newId(), createdAt: Date.now(), finishedAt: null, setupComplete: false, wizardStep: 'info',
+            ground: '', date: new Date().toISOString().split('T')[0], event: '', notes: '', discipline: 'ESP',
+            conditions: { wind: '', light: '' }, equipment: { gunId: '', gunName: '', cartridge: '' },
+            shooterIds: [], stands: [], hits: {}, chokes: {}, activeIdx: 0, isLocked: false, editingTagsForStandId: null
+        };
+    }
+    function activeRound() { return db.activeRound; }
+    function findStand(round, standId) { return round.stands.find(s => s.id === standId); }
+    function ensureHitPath(round, shooterId, standId) {
+        if (!round.hits[shooterId]) round.hits[shooterId] = {};
+        if (!round.hits[shooterId][standId]) round.hits[shooterId][standId] = {};
+    }
+    function getProfile(id) { return db.profiles.find(p => p.id === id); }
+
+    /* =========================================================================================
+       NAVIGATION
+    ========================================================================================= */
+    function goHome() { db.view = 'home'; saveDB(); render(); }
+    function goToMyStats() { const mu = getMainUser(); if (!mu) return; db.analysisShooterId = mu.id; goto('analysis'); }
+    function goto(view) { db.view = view; saveDB(); render(); }
+
+    /* =========================================================================================
+       PROFILES
+    ========================================================================================= */
+    function addProfile() {
+        db.profiles.push({ id: newId(), name: `Shooter ${db.profiles.length + 1}`, cpsa: '', class: 'U', createdAt: Date.now(), isMainUser: false, guns: [], cpsaAverage: '', cpsaIssue: '', cpsaUpdated: null });
+        saveDB(); render();
+    }
+    function updateCpsaRecord(id, field, value) {
+        const p = getProfile(id); if (!p) return;
+        p[field] = value; p.cpsaUpdated = Date.now();
+        saveDB(); render();
+    }
+    function updateProfile(id, field, value) { const p = getProfile(id); if (p) { p[field] = value; saveDB(); } }
+    function deleteProfile(id) {
+        if (!confirm('Delete this shooter profile? Their past round history stays saved but will show as "Unknown Shooter".')) return;
+        db.profiles = db.profiles.filter(p => p.id !== id);
+        saveDB(); render();
+    }
+    function setMainUser(id) {
+        db.profiles.forEach(p => { p.isMainUser = (p.id === id); if (!p.guns) p.guns = []; });
+        saveDB(); render();
+    }
+    function getMainUser() { return db.profiles.find(p => p.isMainUser); }
+    function addGun(name) {
+        const p = getMainUser(); if (!p || !name || !name.trim()) return;
+        if (!p.guns) p.guns = [];
+        p.guns.push({ id: newId(), name: name.trim(), shotOffset: 0, maintenanceLog: [] });
+        saveDB(); render();
+    }
+    function removeGun(gunId) {
+        const p = getMainUser(); if (!p) return;
+        p.guns = (p.guns || []).filter(g => g.id !== gunId);
+        saveDB(); render();
+    }
+    /* Shot count per gun: auto-counted from every round (history + in-progress) where
+       that gun was selected, counting the MAIN USER's own attempted shots (hit+miss) in
+       that round - other squad members' shots aren't attributed to Paul's gun. `shotOffset`
+       is a manual adjustment on top (can be positive or negative) for backfilling rounds
+       shot before this feature existed, or rounds not logged in the app. Old saves may not
+       have `shotOffset`/`maintenanceLog` on a gun yet, hence the `|| 0` / `|| []` guards
+       throughout instead of a migration. */
+    function gunAutoShotCount(gun, mainUserId) {
+        const rounds = [...db.history, ...(db.activeRound ? [db.activeRound] : [])];
+        let total = 0;
+        rounds.forEach(r => { if (r.equipment?.gunId === gun.id) total += shooterRoundAttempts(r, mainUserId); });
+        return total;
+    }
+    function gunTotalShotCount(gun, mainUserId) { return gunAutoShotCount(gun, mainUserId) + (gun.shotOffset || 0); }
+    function updateGunOffset(gunId, value) {
+        const p = getMainUser(); if (!p) return;
+        const g = (p.guns || []).find(g => g.id === gunId); if (!g) return;
+        g.shotOffset = parseInt(value) || 0;
+        saveDB(); render();
+    }
+    // Maintenance log is purely a dated record (service/clean/parts) sitting alongside the
+    // shot count - logging an entry never resets or offsets the count itself.
+    function addMaintenanceEntry(gunId, date, note) {
+        const p = getMainUser(); if (!p) return;
+        const g = (p.guns || []).find(g => g.id === gunId); if (!g) return;
+        if (!note || !note.trim()) return;
+        if (!g.maintenanceLog) g.maintenanceLog = [];
+        g.maintenanceLog.push({ id: newId(), date: date || new Date().toISOString().split('T')[0], note: note.trim(), createdAt: Date.now() });
+        saveDB(); render();
+    }
+    function removeMaintenanceEntry(gunId, entryId) {
+        const p = getMainUser(); if (!p) return;
+        const g = (p.guns || []).find(g => g.id === gunId); if (!g) return;
+        g.maintenanceLog = (g.maintenanceLog || []).filter(e => e.id !== entryId);
+        saveDB(); render();
+    }
+
+    /* =========================================================================================
+       NEW ROUND WIZARD
+    ========================================================================================= */
+    function startNewRound() { db.activeRound = newRound(); db.view = 'setup-info'; saveDB(); render(); }
+    function continueRound() { db.view = db.activeRound.wizardStep || 'scoring'; saveDB(); render(); }
+    function abandonActiveRound() {
+        if (!confirm('Discard this in-progress round? This cannot be undone.')) return;
+        db.activeRound = null; db.view = 'home'; saveDB(); render();
+    }
+    function wizardNext(nextStep) { db.activeRound.wizardStep = nextStep; db.view = nextStep; saveDB(); render(); }
+    function toggleSquadMember(id) {
+        const r = activeRound(); const i = r.shooterIds.indexOf(id);
+        if (i >= 0) r.shooterIds.splice(i, 1); else r.shooterIds.push(id);
+        saveDB(); render();
+    }
+    function goToStandSetup() {
+        if (!activeRound().shooterIds.length) { alert('Pick at least one shooter.'); return; }
+        wizardNext('setup-stands');
+    }
+    function addStand() { activeRound().stands.push({ id: newId(), slots: [] }); saveDB(); render(); }
+    function getShooterChoke(round, shooterId, standId) {
+        if (round.chokes?.[shooterId]?.[standId]) return round.chokes[shooterId][standId];
+        // carry forward the most recent choke this shooter set on an earlier stand
+        const idx = round.stands.findIndex(s => s.id === standId);
+        for (let i = idx - 1; i >= 0; i--) {
+            const prev = round.chokes?.[shooterId]?.[round.stands[i].id];
+            if (prev) return prev;
+        }
+        return '';
+    }
+    function setShooterChoke(shooterId, standId, value) {
+        const r = activeRound();
+        if (!r.chokes) r.chokes = {};
+        if (!r.chokes[shooterId]) r.chokes[shooterId] = {};
+        r.chokes[shooterId][standId] = value;
+        saveDB(); render();
+    }
+    function removeStand(standId) {
+        const r = activeRound();
+        r.stands = r.stands.filter(s => s.id !== standId);
+        Object.values(r.hits).forEach(byStand => delete byStand[standId]);
+        saveDB(); render();
+    }
+    /* A "pair definition" (defId) is the bird(s) as they appear on the stand board —
+       e.g. "rabbit + quartering midi, on report". ESP throws the SAME definition
+       repeatedly for however many pairs the stand calls for, so each definition also
+       has a repeatCount. Every repetition still gets its own pairId group of real,
+       independently-scoreable slots (so a hit on rep 2 doesn't affect rep 1), but the
+       clayType/presentation only need to be set ONCE per bird position and are kept in
+       sync across every repetition by updateSlot(). */
+    // Defaults new/ungrown slots to the middle distance band rather than the first
+    // (nearest) one, since "unset" shouldn't silently read as "very close" in analysis.
+    function defaultDistanceBand() {
+        const d = db.presets.distanceBands || [];
+        return d[Math.floor(d.length / 2)] || d[0] || '';
+    }
+    function addPairGroup(standId, pairType, repeatCount) {
+        const st = findStand(activeRound(), standId);
+        const defId = newId();
+        const birds = pairType === 'single' ? 1 : 2;
+        const reps = Math.max(1, parseInt(repeatCount) || 1);
+        for (let rep = 0; rep < reps; rep++) {
+            const pairId = newId();
+            for (let b = 0; b < birds; b++) {
+                st.slots.push({ id: newId(), clayType: db.presets.clayTypes[0], presentation: db.presets.presentations[0], distance: defaultDistanceBand(), pairId, pairType, defId, birdIndex: b });
+            }
+        }
+        saveDB(); render();
+    }
+    function removePairGroup(standId, defId) {
+        const st = findStand(activeRound(), standId);
+        const removedIds = st.slots.filter(s => (s.defId || s.pairId) === defId).map(s => s.id);
+        st.slots = st.slots.filter(s => (s.defId || s.pairId) !== defId);
+        const r = activeRound();
+        Object.values(r.hits).forEach(byStand => { const cell = byStand[standId]; if (cell) removedIds.forEach(id => delete cell[id]); });
+        saveDB(); render();
+    }
+    function updateSlot(standId, slotId, field, value) {
+        const st = findStand(activeRound(), standId);
+        const slot = st.slots.find(s => s.id === slotId);
+        if (!slot) return;
+        // Propagate clayType/presentation to every repetition of this same bird position,
+        // so tagging a pair once applies to all X repeats of it on this stand.
+        const defKey = slot.defId || slot.pairId;
+        st.slots.forEach(s => { if ((s.defId || s.pairId) === defKey && s.birdIndex === slot.birdIndex) s[field] = value; });
+        saveDB(); render();
+    }
+    function updatePairGroupType(standId, defId, newType) {
+        const st = findStand(activeRound(), standId);
+        const slots = st.slots.filter(s => (s.defId || s.pairId) === defId);
+        if (!slots.length) return;
+        const wantBirds = newType === 'single' ? 1 : 2;
+        const pairIds = [...new Set(slots.map(s => s.pairId))];
+        slots.forEach(s => { s.pairType = newType; });
+        const r = activeRound();
+        pairIds.forEach(pairId => {
+            const repSlots = slots.filter(s => s.pairId === pairId);
+            if (repSlots.length > wantBirds) {
+                const removeId = repSlots[repSlots.length - 1].id;
+                st.slots = st.slots.filter(s => s.id !== removeId);
+                Object.values(r.hits).forEach(byStand => { const cell = byStand[standId]; if (cell) delete cell[removeId]; });
+            } else if (repSlots.length < wantBirds) {
+                st.slots.push({ id: newId(), clayType: repSlots[0].clayType, presentation: repSlots[0].presentation, distance: repSlots[0].distance || defaultDistanceBand(), pairId, pairType: newType, defId, birdIndex: 1 });
+            }
+        });
+        saveDB(); render();
+    }
+    function setPairGroupRepeatCount(standId, defId, newCount) {
+        const st = findStand(activeRound(), standId);
+        const defSlots = st.slots.filter(s => (s.defId || s.pairId) === defId);
+        if (!defSlots.length) return;
+        const pairType = defSlots[0].pairType;
+        const birds = pairType === 'single' ? 1 : 2;
+        const pairIds = [...new Set(defSlots.map(s => s.pairId))];
+        const count = Math.max(1, parseInt(newCount) || 1);
+        const r = activeRound();
+        if (count > pairIds.length) {
+            const template = {};
+            defSlots.filter(s => s.pairId === pairIds[0]).forEach(s => { template[s.birdIndex] = { clayType: s.clayType, presentation: s.presentation, distance: s.distance }; });
+            for (let i = pairIds.length; i < count; i++) {
+                const pairId = newId();
+                for (let b = 0; b < birds; b++) {
+                    st.slots.push({ id: newId(), clayType: template[b]?.clayType || db.presets.clayTypes[0], presentation: template[b]?.presentation || db.presets.presentations[0], distance: template[b]?.distance || defaultDistanceBand(), pairId, pairType, defId, birdIndex: b });
+                }
+            }
+        } else if (count < pairIds.length) {
+            const removePairIds = pairIds.slice(count);
+            const removedSlotIds = st.slots.filter(s => removePairIds.includes(s.pairId)).map(s => s.id);
+            st.slots = st.slots.filter(s => !removePairIds.includes(s.pairId));
+            Object.values(r.hits).forEach(byStand => { const cell = byStand[standId]; if (cell) removedSlotIds.forEach(id => delete cell[id]); });
+        }
+        saveDB(); render();
+    }
+    function standTargetCount(st) { return st.slots.length; }
+    function setStandCount(count) {
+        const r = activeRound();
+        const n = Math.max(0, parseInt(count) || 0);
+        while (r.stands.length < n) r.stands.push({ id: newId(), slots: [] });
+        if (r.stands.length > n) r.stands = r.stands.slice(0, n);
+        saveDB(); render();
+    }
+    function finishStandSetup() {
+        const r = activeRound();
+        if (r.stands.length === 0) { alert('Add at least one stand before starting scoring.'); return; }
+        r.setupComplete = true; r.activeIdx = 0;
+        wizardNext('scoring');
+    }
+
+    /* =========================================================================================
+       SCORING
+    ========================================================================================= */
+    let undoSnapshot = null;
+    // Barrel is inferred automatically from a target's position within its pair —
+    // first bird of a pair/following/on-report group = 1st barrel, second bird = 2nd barrel.
+    // No manual toggle: this matches how a shooter actually loads (barrel 1 at the first
+    // bird, barrel 2 at the second) rather than tracking genuine "took 2 shots at one bird" recoveries.
+    function slotBarrel(st, slotId) {
+        const slot = st.slots.find(s => s.id === slotId);
+        if (!slot) return 'hit1';
+        const group = st.slots.filter(s => s.pairId === slot.pairId);
+        return group.findIndex(s => s.id === slotId) === 0 ? 'hit1' : 'hit2';
+    }
+    function setHit(shooterId, standId, slotId) {
+        const r = activeRound();
+        if (r.isLocked) return;
+        undoSnapshot = JSON.stringify(r.hits);
+        ensureHitPath(r, shooterId, standId);
+        const st = findStand(r, standId);
+        const barrel = slotBarrel(st, slotId);
+        const byStand = r.hits[shooterId][standId];
+        const cell = byStand[slotId] || (byStand[slotId] = { result: null, missReason: null });
+        cell.result = (cell.result === 'hit1' || cell.result === 'hit2') ? null : barrel;
+        cell.missReason = null;
+        if (cell.result !== null && navigator.vibrate) navigator.vibrate(50);
+        saveDB(); render();
+    }
+    function setMiss(shooterId, standId, slotId) {
+        const r = activeRound();
+        if (r.isLocked) return;
+        undoSnapshot = JSON.stringify(r.hits);
+        ensureHitPath(r, shooterId, standId);
+        const byStand = r.hits[shooterId][standId];
+        const cell = byStand[slotId] || (byStand[slotId] = { result: null, missReason: null });
+        cell.result = (cell.result === 'miss') ? null : 'miss';
+        if (cell.result !== 'miss') cell.missReason = null;
+        if (cell.result !== null && navigator.vibrate) navigator.vibrate([40, 40, 40]);
+        saveDB(); render();
+    }
+    function setMissReason(shooterId, standId, slotId, reason) {
+        const r = activeRound();
+        const cell = r.hits[shooterId]?.[standId]?.[slotId];
+        if (!cell || cell.result !== 'miss') return;
+        cell.missReason = (cell.missReason === reason) ? null : reason;
+        saveDB(); render();
+    }
+    function undo() { if (undoSnapshot) { activeRound().hits = JSON.parse(undoSnapshot); undoSnapshot = null; saveDB(); render(); } }
+    function toggleLock() { activeRound().isLocked = !activeRound().isLocked; saveDB(); render(); }
+    function scoringNav(d) {
+        const r = activeRound(); if (r.isLocked) return;
+        r.activeIdx = Math.max(0, Math.min(r.stands.length - 1, r.activeIdx + d));
+        saveDB(); render();
+    }
+    function shooterStandTotal(round, shooterId, standId) {
+        const st = findStand(round, standId);
+        const byStand = round.hits[shooterId]?.[standId] || {};
+        let hits = 0;
+        st.slots.forEach(sl => { const c = byStand[sl.id]; if (c && (c.result === 'hit1' || c.result === 'hit2')) hits++; });
+        return hits;
+    }
+    function shooterRoundTotal(round, shooterId) {
+        let t = 0; round.stands.forEach(st => t += shooterStandTotal(round, shooterId, st.id)); return t;
+    }
+    function shooterRoundAttempts(round, shooterId) {
+        let t = 0;
+        round.stands.forEach(st => { const byStand = round.hits[shooterId]?.[st.id] || {}; st.slots.forEach(sl => { if (byStand[sl.id]?.result) t++; }); });
+        return t;
+    }
+    function finishRound() {
+        const r = activeRound();
+        if (!confirm('Finish this round and save it to history? You can still review and export it afterwards.')) return;
+        r.finishedAt = Date.now();
+        db.history.push(r);
+        db.activeRound = null;
+        db.historyRoundId = r.id;
+        db.view = 'round-detail';
+        saveDB(); render();
+    }
+
+    /* =========================================================================================
+       EXPORT (CSV / PDF / Image) — works against any round object
+    ========================================================================================= */
+    function getUKDate(d) { return d ? new Date(d).toLocaleDateString('en-GB') : 'N/A'; }
+    function downloadCSV(round) {
+        let csv = 'Shooter,CPSA,Class,Total,Attempts,Hit%\n';
+        round.shooterIds.forEach(id => {
+            const p = getProfile(id) || { name: 'Unknown', cpsa: '', class: '' };
+            const total = shooterRoundTotal(round, id), att = shooterRoundAttempts(round, id);
+            const pct = att ? Math.round(total / att * 100) : 0;
+            csv += `${p.name},${p.cpsa},${p.class},${total},${att},${pct}%\n`;
+        });
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `scores-${round.date}.csv`; a.click();
+    }
+    function generateExportGrid(tid, round) {
+        const grid = document.getElementById(tid);
+        grid.innerHTML = '';
+        const isShare = tid === 'cap-grid';
+        const rowH = isShare ? '45px' : '30px', headH = isShare ? '40px' : '25px', pairH = isShare ? '25px' : '18px';
+        let h = `<tr style="background:#f0f0f0"><th style="width:200px; vertical-align:middle;" rowspan="2"><div class="cell-center">NAME</div></th>`;
+        round.stands.forEach((st, i) => { h += `<th colspan="${Math.max(1, Math.ceil(st.slots.length / 2))}" style="vertical-align:middle; height:${headH};"><div class="cell-center">ST ${i + 1}</div></th>`; });
+        h += `<th style="width:60px; vertical-align:middle;" rowspan="2"><div class="cell-center">TOTAL</div></th></tr><tr>`;
+        round.stands.forEach(st => { for (let p = 1; p <= Math.max(1, Math.ceil(st.slots.length / 2)); p++) h += `<th style="font-size:6pt; height:${pairH}; background:#fafafa; vertical-align:middle;"><div class="cell-center">P${p}</div></th>`; });
+        grid.innerHTML = h + '</tr>';
+        const sorted = round.shooterIds.map(id => ({ id, name: (getProfile(id) || {}).name || 'Unknown', t: shooterRoundTotal(round, id) })).sort((a, b) => b.t - a.t);
+        sorted.forEach(s => {
+            let r1 = `<tr><td style="text-align:left; padding-left:10px; vertical-align:middle; white-space:normal;" rowspan="2"><strong>${s.name}</strong></td>`;
+            let r2 = `<tr>`;
+            round.stands.forEach(st => {
+                const byStand = round.hits[s.id]?.[st.id] || {};
+                const pairCount = Math.max(1, Math.ceil(st.slots.length / 2));
+                for (let i = 0; i < pairCount * 2; i += 2) {
+                    const d = (idx) => {
+                        const slot = st.slots[idx]; if (!slot) return { m: '', bg: 'transparent' };
+                        const res = byStand[slot.id]?.result;
+                        if (res === 'hit1' || res === 'hit2') return { m: '/', bg: '#4ade80' };
+                        if (res === 'miss') return { m: 'O', bg: '#f87171' };
+                        return { m: '', bg: 'transparent' };
+                    };
+                    const b1 = d(i), b2 = d(i + 1);
+                    r1 += `<td style="background:${b1.bg}; height:${rowH}; vertical-align:middle;"><div class="cell-center" style="font-weight:900;">${b1.m}</div></td>`;
+                    r2 += `<td style="background:${b2.bg}; height:${rowH}; vertical-align:middle;"><div class="cell-center" style="font-weight:900;">${b2.m}</div></td>`;
+                }
+            });
+            r1 += `<td style="font-weight:bold; font-size:16pt; vertical-align:middle; background:#fafafa;" rowspan="2"><div class="cell-center">${s.t}</div></td></tr>`;
+            grid.innerHTML += r1 + r2 + '</tr>';
+        });
+    }
+    window.exportToPDF = (round) => {
+        document.getElementById('p-ground').innerText = round.ground || 'N/A';
+        document.getElementById('p-date').innerText = getUKDate(round.date);
+        document.getElementById('p-notes').innerText = round.notes || '';
+        generateExportGrid('p-grid', round);
+        window.print();
+    };
+    window.shareAsImage = async (round) => {
+        const container = document.getElementById('capture-container');
+        document.getElementById('cap-ground').innerText = round.ground || 'N/A';
+        document.getElementById('cap-date').innerText = getUKDate(round.date);
+        generateExportGrid('cap-grid', round);
+        try {
+            container.style.position = 'fixed'; container.style.left = '0'; container.style.top = '0'; container.style.zIndex = '-1';
+            const canvas = await html2canvas(container, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
+            container.style.position = 'absolute'; container.style.left = '-9999px';
+            canvas.toBlob(async (blob) => {
+                if (!blob) return;
+                const file = new File([blob], 'leaderboard.png', { type: 'image/png' });
+                if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({ files: [file], title: 'Squad Leaderboard' });
+                } else {
+                    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'scores.png'; a.click();
+                }
+            });
+        } catch (e) {}
+    };
+
+    /* =========================================================================================
+       ANALYSIS ENGINE
+    ========================================================================================= */
+    function getAllShots({ shooterId = null, groundFilter = null, includeActive = true } = {}) {
+        const rounds = [...db.history, ...(includeActive && db.activeRound ? [db.activeRound] : [])];
+        const shots = [];
+        rounds.forEach(r => {
+            if (groundFilter && (r.ground || '').trim().toLowerCase() !== groundFilter.trim().toLowerCase()) return;
+            r.stands.forEach((st, standPos) => {
+                st.slots.forEach(slot => {
+                    Object.keys(r.hits || {}).forEach(shId => {
+                        if (shooterId && shId !== shooterId) return;
+                        const cell = r.hits[shId]?.[st.id]?.[slot.id];
+                        if (!cell || cell.result == null) return;
+                        shots.push({
+                            roundId: r.id, date: r.date, ground: r.ground || '(no ground set)', shooterId: shId,
+                            standId: st.id, standPos: standPos + 1, standTotal: r.stands.length,
+                            clayType: slot.clayType, presentation: slot.presentation, pairType: slot.pairType,
+                            distance: slot.distance || '(not set)',
+                            choke: getShooterChoke(r, shId, st.id) || '(not set)', result: cell.result, missReason: cell.missReason
+                        });
+                    });
+                });
+            });
+        });
+        return shots;
+    }
+    function pctBy(shots, keyFn, minSample = 5) {
+        const groups = {};
+        shots.forEach(s => { const k = keyFn(s) || '(untagged)'; (groups[k] = groups[k] || []).push(s); });
+        return Object.entries(groups).map(([key, arr]) => {
+            const hits = arr.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
+            return { key, attempts: arr.length, hits, pct: arr.length ? Math.round(hits / arr.length * 100) : 0, lowSample: arr.length < minSample };
+        }).sort((a, b) => a.pct - b.pct);
+    }
+    function barrelSplit(shots) {
+        const hits = shots.filter(s => s.result === 'hit1' || s.result === 'hit2');
+        const hit1 = hits.filter(s => s.result === 'hit1').length, hit2 = hits.filter(s => s.result === 'hit2').length;
+        return {
+            hit1, hit2, total: hits.length,
+            pctFirst: hits.length ? Math.round(hit1 / hits.length * 100) : 0,
+            pctSecond: hits.length ? Math.round(hit2 / hits.length * 100) : 0
+        };
+    }
+    function fatigueBuckets(shots) {
+        const buckets = { 'First Third': [], 'Middle Third': [], 'Last Third': [] };
+        shots.forEach(s => {
+            const frac = s.standPos / s.standTotal;
+            if (frac <= 1 / 3) buckets['First Third'].push(s);
+            else if (frac <= 2 / 3) buckets['Middle Third'].push(s);
+            else buckets['Last Third'].push(s);
+        });
+        return Object.entries(buckets).map(([key, arr]) => {
+            const hits = arr.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
+            return { key, attempts: arr.length, hits, pct: arr.length ? Math.round(hits / arr.length * 100) : 0 };
+        });
+    }
+    function trendByDate(shots) {
+        const groups = {};
+        shots.forEach(s => (groups[s.date] = groups[s.date] || []).push(s));
+        return Object.entries(groups).map(([date, arr]) => {
+            const hits = arr.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
+            return { date, attempts: arr.length, pct: arr.length ? Math.round(hits / arr.length * 100) : 0 };
+        }).sort((a, b) => a.date.localeCompare(b.date));
+    }
+    function bestRound(shooterId) {
+        const rounds = db.history.filter(r => r.shooterIds.includes(shooterId));
+        let best = null;
+        rounds.forEach(r => {
+            const att = shooterRoundAttempts(r, shooterId);
+            if (!att) return;
+            const total = shooterRoundTotal(r, shooterId);
+            const pct = total / att * 100;
+            if (!best || pct > best.pct || (pct === best.pct && total > best.total)) {
+                best = { roundId: r.id, ground: r.ground || 'Unnamed Ground', date: r.date, event: r.event, total, att, pct: Math.round(pct) };
+            }
+        });
+        return best;
+    }
+    function rollingAverage(shooterId, windowSize) {
+        const rounds = db.history.filter(r => r.shooterIds.includes(shooterId)).sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0)).slice(0, windowSize);
+        if (rounds.length === 0) return null;
+        const pcts = rounds.map(r => { const att = shooterRoundAttempts(r, shooterId); const t = shooterRoundTotal(r, shooterId); return att ? t / att * 100 : 0; });
+        return Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
+    }
+
+    /* =========================================================================================
+       BACKUP / RESTORE
+    ========================================================================================= */
+    function exportBackup() {
+        const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `sarge-backup-${new Date().toISOString().split('T')[0]}.json`; a.click();
+    }
+    function triggerImport() { document.getElementById('import-file-input').click(); }
+    function handleImportFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const parsed = JSON.parse(e.target.result);
+                if (!parsed.profiles || !parsed.history) { alert('That file doesn\'t look like a Sarge backup.'); return; }
+                if (!confirm('This will REPLACE all current data (profiles, history, in-progress round) with the backup. Continue?')) return;
+                db = Object.assign(defaultDB(), parsed);
+                db.presets = Object.assign(defaultPresets(), db.presets || {});
+                saveDB(); render();
+                alert('Backup restored.');
+            } catch (err) { alert('Could not read that file - is it a valid Sarge backup JSON?'); }
+        };
+        reader.readAsText(file);
+    }
+    function resetAllData() {
+        if (!confirm('This wipes EVERYTHING — all profiles, all round history, all presets. This cannot be undone. Consider exporting a backup first. Continue?')) return;
+        localStorage.removeItem(DB_KEY);
+        location.reload();
+    }
+
+    /* =========================================================================================
+       PRESETS (Settings)
+    ========================================================================================= */
+    function addPreset(listName, value) {
+        if (!value || !value.trim()) return;
+        if (!db.presets[listName].includes(value.trim())) db.presets[listName].push(value.trim());
+        saveDB(); render();
+    }
+    function removePreset(listName, value) {
+        db.presets[listName] = db.presets[listName].filter(v => v !== value);
+        saveDB(); render();
+    }
+
+    /* =========================================================================================
+       GOALS
+    ========================================================================================= */
+    function addGoal(shooterId) {
+        const p = getProfile(shooterId); if (!p) return;
+        if (!p.goals) p.goals = [];
+        p.goals.push({ id: newId(), metricType: 'presentation', metricValue: db.presets.presentations[0], targetPct: 80, targetDate: '', createdAt: Date.now() });
+        saveDB(); render();
+    }
+    function updateGoal(shooterId, goalId, field, value) {
+        const p = getProfile(shooterId); const g = (p.goals || []).find(g => g.id === goalId);
+        if (!g) return;
+        g[field] = field === 'targetPct' ? parseInt(value) || 0 : value;
+        if (field === 'metricType') g.metricValue = metricPresetList(value)[0] || '';
+        saveDB(); render();
+    }
+    function removeGoal(shooterId, goalId) {
+        const p = getProfile(shooterId); p.goals = (p.goals || []).filter(g => g.id !== goalId); saveDB(); render();
+    }
+    function resetShooterStats(shooterId) {
+        const p = getProfile(shooterId);
+        const name = p ? p.name : 'this shooter';
+        if (!confirm(`Reset ALL recorded stats for ${name}? This clears every shot they've logged across every round in history (their totals will show as 0/0). Other shooters' data in those rounds is not affected. This cannot be undone.`)) return;
+        [...db.history, ...(db.activeRound ? [db.activeRound] : [])].forEach(r => {
+            if (r.hits && r.hits[shooterId]) delete r.hits[shooterId];
+            if (r.chokes && r.chokes[shooterId]) delete r.chokes[shooterId];
+        });
+        saveDB(); render();
+    }
+    function goalProgress(shooterId, goal) {
+        const shots = getAllShots({ shooterId });
+        const filtered = shots.filter(s => s[goal.metricType] === goal.metricValue);
+        const hits = filtered.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
+        const pct = filtered.length ? Math.round(hits / filtered.length * 100) : 0;
+        return { pct, attempts: filtered.length };
+    }
+    function metricPresetList(metricType) {
+        if (metricType === 'presentation') return db.presets.presentations;
+        if (metricType === 'distance') return db.presets.distanceBands;
+        return db.presets.clayTypes;
+    }
+
+    /* =========================================================================================
+       RENDER — ROUTER
+    ========================================================================================= */
+    function render() {
+        document.body.classList.toggle('glove-mode', !!db.gloveMode);
+        renderHeaderActions();
+        renderNav();
+        const container = document.getElementById('app-container');
+        switch (db.view) {
+            case 'home': container.innerHTML = viewHome(); break;
+            case 'profiles': container.innerHTML = viewProfiles(); break;
+            case 'setup-info': container.innerHTML = viewSetupInfo(); break;
+            case 'setup-squad': container.innerHTML = viewSetupSquad(); break;
+            case 'setup-stands': container.innerHTML = viewSetupStands(); break;
+            case 'scoring': container.innerHTML = viewScoring(); break;
+            case 'history': container.innerHTML = viewHistory(); break;
+            case 'round-detail': container.innerHTML = viewRoundDetail(); break;
+            case 'analysis': container.innerHTML = viewAnalysis(); break;
+            case 'settings': container.innerHTML = viewSettings(); break;
+            default: container.innerHTML = viewHome();
+        }
+        lucide.createIcons();
+        if (db.view === 'analysis') renderTrendChart();
+    }
+    // Trend chart lives on a <canvas> that gets wiped and recreated every render()
+    // (innerHTML replacement above destroys the old canvas element), so the Chart.js
+    // instance has to be destroyed and rebuilt each time too - can't just update data.
+    // Wrapped defensively: if Chart.js failed to load (offline before first cache, or
+    // the CDN is blocked), the rest of the app must keep working - this chart is a
+    // nice-to-have on top of the bar-row data, not a dependency for anything else.
+    let trendChartInstance = null;
+    function renderTrendChart() {
+        const canvas = document.getElementById('trend-chart');
+        if (!canvas || typeof Chart === 'undefined') return;
+        if (trendChartInstance) { trendChartInstance.destroy(); trendChartInstance = null; }
+        const shots = getAllShots({ shooterId: db.analysisShooterId });
+        const trend = trendByDate(shots);
+        if (!trend.length) return;
+        try {
+            trendChartInstance = new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: trend.map(t => getUKDate(t.date)),
+                    datasets: [{
+                        label: 'Hit %', data: trend.map(t => t.pct),
+                        borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.12)',
+                        borderWidth: 2, tension: 0.25, fill: true, pointRadius: 3, pointBackgroundColor: '#f97316'
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } } }
+                }
+            });
+        } catch (e) {}
+    }
+    function renderHeaderActions() {
+        const el = document.getElementById('header-actions');
+        if (db.view === 'scoring') {
+            const r = activeRound();
+            el.innerHTML = `
+                <button onclick="toggleGloveMode()" title="Glove mode" class="glove-header-btn p-2 rounded-lg border ${db.gloveMode ? 'bg-orange-500 border-orange-500' : 'bg-slate-800 border-slate-700'}"><i data-lucide="hand" class="w-4 h-4 ${db.gloveMode ? 'text-white' : 'text-slate-400'}"></i></button>
+                <button onclick="undo()" id="undo-btn" class="${undoSnapshot ? '' : 'hidden'} text-[9px] font-black text-white uppercase flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700"><i data-lucide="rotate-ccw" size="10"></i></button>
+                <button onclick="toggleLock()" class="glove-header-btn bg-slate-800 p-2 rounded-lg border border-slate-700"><i data-lucide="${r.isLocked ? 'lock' : 'unlock'}" class="w-4 h-4 text-slate-400"></i></button>
+                <button onclick="shareAsImage(activeRound())" class="glove-header-btn bg-slate-700 p-2 rounded-lg border border-slate-600"><i data-lucide="share-2" class="w-4 h-4 text-white"></i></button>
+                <button onclick="exportToPDF(activeRound())" class="bg-orange-500 px-3 py-2 rounded-lg text-[10px] font-black uppercase">PDF</button>`;
+        } else if (db.view === 'round-detail') {
+            const round = db.history.find(r => r.id === db.historyRoundId);
+            el.innerHTML = round ? `
+                <button onclick="toggleGloveMode()" title="Glove mode" class="glove-header-btn p-2 rounded-lg border ${db.gloveMode ? 'bg-orange-500 border-orange-500' : 'bg-slate-800 border-slate-700'}"><i data-lucide="hand" class="w-4 h-4 ${db.gloveMode ? 'text-white' : 'text-slate-400'}"></i></button>
+                <button onclick="downloadCSV(round_ref())" class="bg-slate-700 text-white px-2 py-2 rounded-lg text-[9px] font-black uppercase">CSV</button>
+                <button onclick="shareAsImage(round_ref())" class="bg-slate-700 p-2 rounded-lg border border-slate-600"><i data-lucide="share-2" class="w-4 h-4 text-white"></i></button>
+                <button onclick="exportToPDF(round_ref())" class="bg-orange-500 px-3 py-2 rounded-lg text-[10px] font-black uppercase">PDF</button>` : '';
+        } else {
+            el.innerHTML = `
+                <button onclick="toggleGloveMode()" title="Glove mode" class="glove-header-btn p-2 rounded-lg border ${db.gloveMode ? 'bg-orange-500 border-orange-500' : 'bg-slate-800 border-slate-700'}"><i data-lucide="hand" class="w-4 h-4 ${db.gloveMode ? 'text-white' : 'text-slate-400'}"></i></button>
+                <button onclick="goto('settings')" class="bg-slate-800 p-2 rounded-lg border border-slate-700"><i data-lucide="settings" class="w-4 h-4 text-slate-400"></i></button>`;
+        }
+    }
+    function round_ref() { return db.history.find(r => r.id === db.historyRoundId); }
+    function renderNav() {
+        const nav = document.getElementById('main-nav');
+        if (['setup-info', 'setup-squad', 'setup-stands', 'scoring'].includes(db.view)) { nav.innerHTML = ''; return; }
+        const items = [
+            { key: 'home', icon: 'home', label: 'Home' },
+            { key: 'profiles', icon: 'users', label: 'Shooters' },
+            { key: 'history', icon: 'history', label: 'History' },
+            { key: 'analysis', icon: 'bar-chart-2', label: 'Analysis' },
+            { key: 'settings', icon: 'settings', label: 'Settings' }
+        ];
+        nav.innerHTML = items.map(i => `<button class="navbtn ${db.view === i.key ? 'active' : ''}" onclick="goto('${i.key}')"><i data-lucide="${i.icon}" size="16"></i>${i.label}</button>`).join('');
+    }
+
+    /* =========================================================================================
+       VIEW: HOME
+    ========================================================================================= */
+    function viewHome() {
+        const r = db.activeRound;
+        return `
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 text-center">
+                <h2 class="text-lg font-black uppercase italic text-slate-900">English Sporting</h2>
+                <p class="text-[10px] text-slate-400 font-bold uppercase mb-3">Other CPSA disciplines coming later</p>
+                ${r ? `
+                    <button onclick="continueRound()" class="w-full bg-orange-500 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest mb-2">Continue Round (${r.ground || 'Unnamed'})</button>
+                    <button onclick="abandonActiveRound()" class="w-full bg-white border border-red-200 text-red-500 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest">Discard In-Progress Round</button>
+                ` : `
+                    <button onclick="startNewRound()" class="w-full bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest">+ New Round</button>
+                `}
+            </section>
+            ${getMainUser() ? `
+            <button onclick="goToMyStats()" class="w-full bg-slate-900 rounded-xl shadow-sm p-3 text-left flex items-center gap-2">
+                <i data-lucide="star" class="w-5 h-5 text-orange-400"></i>
+                <div>
+                    <div class="text-[11px] font-black uppercase text-white">My Stats</div>
+                    <div class="text-[9px] text-slate-400 font-bold">${getMainUser().name}'s full analysis, one tap away</div>
+                </div>
+            </button>` : ''}
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="goto('profiles')" class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 text-left">
+                    <i data-lucide="users" class="w-5 h-5 text-orange-500 mb-1"></i>
+                    <div class="text-[11px] font-black uppercase">Shooters</div>
+                    <div class="text-[9px] text-slate-400 font-bold">${db.profiles.length} saved</div>
+                </button>
+                <button onclick="goto('history')" class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 text-left">
+                    <i data-lucide="history" class="w-5 h-5 text-orange-500 mb-1"></i>
+                    <div class="text-[11px] font-black uppercase">Round History</div>
+                    <div class="text-[9px] text-slate-400 font-bold">${db.history.length} saved</div>
+                </button>
+                <button onclick="goto('analysis')" class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 text-left">
+                    <i data-lucide="bar-chart-2" class="w-5 h-5 text-orange-500 mb-1"></i>
+                    <div class="text-[11px] font-black uppercase">Analysis</div>
+                    <div class="text-[9px] text-slate-400 font-bold">Find your weak spots</div>
+                </button>
+                <button onclick="goto('settings')" class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 text-left">
+                    <i data-lucide="settings" class="w-5 h-5 text-orange-500 mb-1"></i>
+                    <div class="text-[11px] font-black uppercase">Settings</div>
+                    <div class="text-[9px] text-slate-400 font-bold">Presets &amp; backup</div>
+                </button>
+            </div>`;
+    }
+
+    /* =========================================================================================
+       VIEW: PROFILES
+    ========================================================================================= */
+    function viewProfiles() {
+        return `
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Shooter Profiles</h3>
+                    <button onclick="addProfile()" class="text-[9px] bg-slate-900 text-white px-3 py-1 rounded-lg font-black uppercase">+ Add</button>
+                </div>
+                <p class="text-[9px] text-slate-400 font-bold mb-2">Mark yourself with the star — that profile gets a personal gun Cabinet you can pick from at round setup.</p>
+                <div class="space-y-2">
+                    ${db.profiles.map(p => `
+                        <div class="border ${p.isMainUser ? 'border-orange-300 bg-orange-50/40' : 'border-slate-200'} rounded-xl p-2.5">
+                            <div class="flex items-center gap-2">
+                                <button onclick="setMainUser('${p.id}')" title="Mark as me"><i data-lucide="star" size="16" class="${p.isMainUser ? 'text-orange-500' : 'text-slate-300'}" ${p.isMainUser ? 'fill="currentColor"' : ''}></i></button>
+                                <input type="text" value="${p.name}" onchange="updateProfile('${p.id}','name',this.value)" class="flex-1 bg-slate-50 rounded-lg p-2 text-xs font-black">
+                                <input type="text" value="${p.cpsa}" placeholder="CPSA #" onchange="updateProfile('${p.id}','cpsa',this.value)" class="w-20 bg-slate-50 rounded-lg p-2 text-[10px] font-bold">
+                                <select onchange="updateProfile('${p.id}','class',this.value)" class="bg-slate-50 rounded-lg p-2 text-[10px] font-black">${['AAA','AA','A','B','C','U'].map(c => `<option ${p.class === c ? 'selected' : ''}>${c}</option>`)}</select>
+                                <button onclick="deleteProfile('${p.id}')" class="text-red-400"><i data-lucide="trash-2" size="16"></i></button>
+                            </div>
+                            ${p.isMainUser ? renderArmoury(p) : ''}
+                        </div>
+                    `).join('') || `<p class="text-[10px] text-slate-400 font-bold text-center py-4">No shooters yet — add one to get started.</p>`}
+                </div>
+            </section>`;
+    }
+    function renderArmoury(p) {
+        return `
+            <div class="mt-2 pt-2 border-t border-orange-200">
+                <div class="text-[8px] font-black uppercase text-orange-500 mb-1">My CPSA Record</div>
+                <p class="text-[8px] text-slate-400 font-bold mb-1.5">Classification uses the Class field above. Copy your average/issue from your CPSA login — this app can't fetch it automatically (no server, and CPSA's averages page requires login).</p>
+                <div class="grid grid-cols-2 gap-1.5 mb-1.5">
+                    <input type="text" value="${p.cpsaAverage || ''}" placeholder="Average % e.g. 78.5" oninput="updateCpsaRecord('${p.id}','cpsaAverage',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
+                    <input type="text" value="${p.cpsaIssue || ''}" placeholder="Issue e.g. 82" oninput="updateCpsaRecord('${p.id}','cpsaIssue',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
+                </div>
+                ${p.cpsaUpdated ? `<div class="text-[7px] text-slate-400 font-bold mb-2">Last updated ${new Date(p.cpsaUpdated).toLocaleDateString('en-GB')}</div>` : ''}
+                <div class="text-[8px] font-black uppercase text-orange-500 mb-1 pt-1.5 border-t border-orange-100">My Cabinet</div>
+                <div class="space-y-1.5 mb-1.5">
+                    ${(p.guns || []).map(g => renderGunCard(g, p.id)).join('') || `<span class="text-[9px] text-slate-400 font-bold">No guns saved yet.</span>`}
+                </div>
+                <div class="flex gap-1.5">
+                    <input type="text" id="new-gun-${p.id}" placeholder="e.g. Browning 725, 30in O/U" class="flex-1 bg-white border border-slate-200 rounded-lg p-1.5 text-[10px] font-bold">
+                    <button onclick="addGun(document.getElementById('new-gun-${p.id}').value); document.getElementById('new-gun-${p.id}').value='';" class="bg-slate-900 text-white px-3 rounded-lg text-[9px] font-black uppercase">Add</button>
+                </div>
+            </div>`;
+    }
+    /* Per-gun card: shot count (auto from rounds + manual offset) and a collapsible
+       maintenance log. Uses native <details>/<summary> for the collapse so no extra
+       app state is needed to track which gun's log is expanded. */
+    function renderGunCard(g, mainUserId) {
+        const auto = gunAutoShotCount(g, mainUserId);
+        const offset = g.shotOffset || 0;
+        const total = auto + offset;
+        const log = [...(g.maintenanceLog || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        return `
+            <div class="bg-white border border-slate-200 rounded-lg p-2">
+                <div class="flex justify-between items-center">
+                    <span class="text-[10px] font-black uppercase">${g.name}</span>
+                    <button onclick="removeGun('${g.id}')" class="text-red-400"><i data-lucide="x" size="12"></i></button>
+                </div>
+                <div class="flex items-baseline gap-1.5 mt-1.5">
+                    <span class="text-sm font-black">${total}</span>
+                    <span class="text-[7px] text-slate-400 font-bold uppercase">shots fired</span>
+                    <span class="text-[7px] text-slate-300 font-bold">(${auto} logged from rounds${offset ? `, ${offset > 0 ? '+' : ''}${offset} manual` : ''})</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-1">
+                    <span class="text-[7px] font-black uppercase text-slate-400">Manual adjustment</span>
+                    <input type="number" value="${offset}" onchange="updateGunOffset('${g.id}', this.value)" class="w-16 bg-slate-50 border border-slate-200 rounded-md p-1 text-[9px] font-bold text-center">
+                    <span class="text-[7px] text-slate-300 font-bold">backfill / rounds not logged here</span>
+                </div>
+                <details class="mt-1.5">
+                    <summary class="text-[8px] font-black uppercase text-orange-500 cursor-pointer">Maintenance log (${log.length})</summary>
+                    <div class="mt-1.5 space-y-1">
+                        ${log.map(e => `
+                            <div class="flex items-center justify-between bg-slate-50 rounded-md p-1.5">
+                                <div class="text-[9px] font-bold"><span class="text-slate-400">${getUKDate(e.date)}</span> — ${e.note}</div>
+                                <button onclick="removeMaintenanceEntry('${g.id}','${e.id}')" class="text-red-400 ml-2"><i data-lucide="x" size="10"></i></button>
+                            </div>
+                        `).join('') || `<p class="text-[9px] text-slate-400 font-bold">No maintenance logged yet.</p>`}
+                        <div class="flex gap-1.5 mt-1">
+                            <input type="date" id="new-maint-date-${g.id}" value="${new Date().toISOString().split('T')[0]}" class="bg-slate-50 border border-slate-200 rounded-md p-1.5 text-[9px] font-bold">
+                            <input type="text" id="new-maint-note-${g.id}" placeholder="e.g. Full clean and service" class="flex-1 bg-slate-50 border border-slate-200 rounded-md p-1.5 text-[9px] font-bold">
+                            <button onclick="addMaintenanceEntry('${g.id}', document.getElementById('new-maint-date-${g.id}').value, document.getElementById('new-maint-note-${g.id}').value); document.getElementById('new-maint-note-${g.id}').value='';" class="bg-slate-900 text-white px-2 rounded-md text-[8px] font-black uppercase">Log</button>
+                        </div>
+                    </div>
+                </details>
+            </div>`;
+    }
+
+    /* =========================================================================================
+       VIEW: SETUP - INFO
+    ========================================================================================= */
+    function viewSetupInfo() {
+        const r = activeRound();
+        return `
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">New Round — Details</h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="col-span-2 space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Shoot Ground</label>
+                        <input type="text" value="${r.ground}" oninput="r_upd('ground',this.value)" placeholder="Ground name..." class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
+                    <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Date</label>
+                        <input type="date" value="${r.date}" onchange="r_upd('date',this.value)" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
+                    <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Event</label>
+                        <input type="text" value="${r.event}" oninput="r_upd('event',this.value)" placeholder="e.g. Club shoot" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
+                    <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Wind</label>
+                        <select onchange="r_upd_nested('conditions','wind',this.value)" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"><option value="">—</option>${db.presets.windOptions.map(w => `<option ${r.conditions.wind === w ? 'selected' : ''}>${w}</option>`).join('')}</select></div>
+                    <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Light</label>
+                        <select onchange="r_upd_nested('conditions','light',this.value)" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"><option value="">—</option>${db.presets.lightOptions.map(w => `<option ${r.conditions.light === w ? 'selected' : ''}>${w}</option>`).join('')}</select></div>
+                    <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Cartridge</label>
+                        ${db.presets.cartridges.length ? `
+                            <select onchange="r_upd_nested('equipment','cartridge',this.value)" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold">
+                                <option value="">—</option>
+                                ${db.presets.cartridges.map(c => `<option ${r.equipment.cartridge === c ? 'selected' : ''}>${c}</option>`).join('')}
+                            </select>` : `<button onclick="goto('settings')" class="w-full bg-slate-50 rounded-lg p-2 text-[10px] font-bold text-orange-500 text-left">No cartridges saved yet — add some in Settings →</button>`}
+                    </div>
+                    <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Gun (from your Cabinet)</label>
+                        ${(() => {
+                            const mu = getMainUser();
+                            if (!mu || !(mu.guns || []).length) {
+                                return `<button onclick="goto('profiles')" class="w-full bg-slate-50 rounded-lg p-2 text-[10px] font-bold text-orange-500 text-left">No guns saved yet — set up your Cabinet →</button>`;
+                            }
+                            return `<select onchange="r_upd_gun(this.value, this.options[this.selectedIndex].text)" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold">
+                                <option value="">—</option>
+                                ${mu.guns.map(g => `<option value="${g.id}" ${r.equipment.gunId === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}
+                            </select>`;
+                        })()}
+                    </div>
+                </div>
+                <p class="text-[9px] text-slate-400 font-bold mt-1">Choke is set per stand, not here — you'll pick it as you tag each stand.</p>
+                <button onclick="wizardNext('setup-squad')" class="w-full bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest mt-2">Next: Pick Squad →</button>
+            </section>`;
+    }
+    function r_upd_gun(id, name) { const r = activeRound(); r.equipment.gunId = id; r.equipment.gunName = id ? name : ''; saveDB(); }
+    function r_upd(field, value) { activeRound()[field] = value; saveDB(); }
+    function r_upd_nested(obj, field, value) { activeRound()[obj][field] = value; saveDB(); }
+
+    /* =========================================================================================
+       VIEW: SETUP - SQUAD
+    ========================================================================================= */
+    function viewSetupSquad() {
+        const r = activeRound();
+        return `
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Pick Squad</h3>
+                    <button onclick="addProfile()" class="text-[9px] bg-slate-900 text-white px-3 py-1 rounded-lg font-black uppercase">+ New Shooter</button>
+                </div>
+                <div class="space-y-1.5">
+                    ${db.profiles.map(p => `
+                        <button onclick="toggleSquadMember('${p.id}')" class="w-full flex items-center gap-2 p-2.5 rounded-xl border-2 ${r.shooterIds.includes(p.id) ? 'border-orange-500 bg-orange-50' : 'border-slate-200 bg-white'}">
+                            <i data-lucide="${r.shooterIds.includes(p.id) ? 'check-circle-2' : 'circle'}" class="w-4 h-4 ${r.shooterIds.includes(p.id) ? 'text-orange-500' : 'text-slate-300'}"></i>
+                            <span class="text-xs font-black uppercase">${p.name}</span>
+                            <span class="text-[9px] text-slate-400 font-bold ml-auto">${p.class}</span>
+                        </button>
+                    `).join('') || `<p class="text-[10px] text-slate-400 font-bold text-center py-4">No shooter profiles yet — add one above.</p>`}
+                </div>
+                <div class="flex gap-2 mt-3">
+                    <button onclick="wizardNext('setup-info')" class="flex-1 bg-white border border-slate-300 py-3 rounded-xl text-xs font-black uppercase">← Back</button>
+                    <button onclick="goToStandSetup()" class="flex-1 bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase">Next: Stands →</button>
+                </div>
+            </section>`;
+    }
+
+    /* =========================================================================================
+       VIEW: SETUP - STANDS (count only — targets are tagged live, stand by stand, during scoring)
+    ========================================================================================= */
+    function viewSetupStands() {
+        const r = activeRound();
+        return `
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">How Many Stands?</h3>
+                <p class="text-[9px] text-slate-400 font-bold mb-2">You don't need to know what's on them yet — you'll tag each stand's targets and choke right when you arrive at it.</p>
+                <div class="flex items-center gap-2 mb-2">
+                    <input type="number" min="0" max="30" value="${r.stands.length}" onchange="setStandCount(this.value)" class="w-24 bg-slate-50 rounded-lg p-2 text-sm font-black text-center">
+                    <span class="text-[9px] text-slate-400 font-bold uppercase">stands (change anytime, even mid-round)</span>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    ${r.stands.map((s, i) => `<span class="chip active">Stand ${i + 1}</span>`).join('') || `<p class="text-[10px] text-slate-400 font-bold py-2">No stands yet — set a count above.</p>`}
+                </div>
+                <div class="flex gap-2 mt-3">
+                    <button onclick="wizardNext('setup-squad')" class="flex-1 bg-white border border-slate-300 py-3 rounded-xl text-xs font-black uppercase">← Back</button>
+                    <button onclick="finishStandSetup()" class="flex-1 bg-orange-500 text-white py-3 rounded-xl text-xs font-black uppercase">Start Scoring →</button>
+                </div>
+            </section>`;
+    }
+    /* Reusable "tag this stand" panel — used live from the scoring screen, not upfront.
+       Groups slots by pair DEFINITION (defId), not by individual repetition, so the
+       shooter tags each distinct bird pairing once and just sets how many times ("× N")
+       that same pairing is thrown at this stand — matching a real ESP stand board. */
+    function renderStandTagPanel(st, idx) {
+        const groups = {};
+        st.slots.forEach(s => { const k = s.defId || s.pairId; (groups[k] = groups[k] || []).push(s); });
+        return `
+            <div class="border border-orange-200 bg-orange-50/40 rounded-xl p-2.5 mb-2">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-[10px] font-black uppercase text-orange-600">Tag Stand ${idx + 1}</span>
+                </div>
+                <p class="text-[8px] text-slate-400 font-bold mb-1.5">Copy this off the stand board — e.g. "rabbit from right plus quartering midi on report". Tag each distinct pair once, then set how many times it's repeated. Choke is set per shooter, down in the scoring list below.</p>
+                <div class="space-y-2">
+                    ${Object.entries(groups).map(([defId, defSlots]) => {
+                        const pairIds = [...new Set(defSlots.map(s => s.pairId))];
+                        const repCount = pairIds.length;
+                        const repBirds = defSlots.filter(s => s.pairId === pairIds[0]);
+                        return `
+                        <div class="bg-white rounded-lg p-2 border border-slate-100">
+                            <div class="flex justify-between items-center mb-1.5">
+                                <select onchange="updatePairGroupType('${st.id}','${defId}', this.value)" class="glove-tag-select text-[8px] font-black uppercase text-orange-500 bg-orange-50 border border-orange-200 rounded-md px-1 py-0.5">
+                                    ${db.presets.pairTypes.map(pt => `<option value="${pt.key}" ${repBirds[0].pairType === pt.key ? 'selected' : ''}>${pt.label}</option>`).join('')}
+                                </select>
+                                <div class="flex items-center gap-1">
+                                    <span class="text-[8px] font-black uppercase text-slate-400">× repeats</span>
+                                    <input type="number" min="1" max="20" value="${repCount}" onchange="setPairGroupRepeatCount('${st.id}','${defId}', this.value)" class="glove-repeat-input w-12 bg-slate-50 border border-slate-200 rounded-md p-1 text-[9px] font-black text-center">
+                                    <button onclick="removePairGroup('${st.id}','${defId}')" class="text-red-400"><i data-lucide="x" size="12"></i></button>
+                                </div>
+                            </div>
+                            <div class="grid ${repBirds.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-1.5">
+                                ${repBirds.map(slot => `
+                                    <div class="space-y-1">
+                                        <select onchange="updateSlot('${st.id}','${slot.id}','clayType',this.value)" class="glove-tag-select w-full bg-slate-50 border border-slate-200 rounded-md p-1.5 text-[9px] font-bold">${db.presets.clayTypes.map(c => `<option ${slot.clayType === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+                                        <select onchange="updateSlot('${st.id}','${slot.id}','presentation',this.value)" class="glove-tag-select w-full bg-slate-50 border border-slate-200 rounded-md p-1.5 text-[9px] font-bold">${db.presets.presentations.map(c => `<option ${slot.presentation === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+                                        <select onchange="updateSlot('${st.id}','${slot.id}','distance',this.value)" class="glove-tag-select w-full bg-slate-50 border border-slate-200 rounded-md p-1.5 text-[9px] font-bold">${db.presets.distanceBands.map(c => `<option ${slot.distance === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div class="text-[7px] text-slate-400 font-bold mt-1 uppercase">${repCount} pair${repCount === 1 ? '' : 's'} thrown this way = ${repCount * repBirds.length} targets</div>
+                        </div>`;
+                    }).join('') || `<p class="text-[9px] text-slate-400 font-bold text-center py-2">Add a pair or single below to start scoring this stand.</p>`}
+                </div>
+                <div class="flex gap-1.5 mt-2 flex-wrap">
+                    ${db.presets.pairTypes.map(pt => `<button onclick="addPairGroup('${st.id}','${pt.key}',1)" class="glove-pairtype-btn text-[8px] bg-white border border-slate-300 px-2 py-1 rounded-lg font-black uppercase">+ ${pt.label}</button>`).join('')}
+                </div>
+            </div>`;
+    }
+
+    /* =========================================================================================
+       VIEW: SCORING
+    ========================================================================================= */
+    function viewScoring() {
+        const r = activeRound();
+        const st = r.stands[r.activeIdx];
+        if (!st) return `<p class="text-center text-xs font-bold text-slate-400 py-8">No stands configured. <button onclick="addStand()" class="text-orange-500 underline">Add one</button></p>`;
+        let sTotalShot = 0, sTotalPossible = 0;
+        r.stands.forEach(s => { sTotalPossible += s.slots.length * r.shooterIds.length; r.shooterIds.forEach(shId => { const byStand = r.hits[shId]?.[s.id] || {}; s.slots.forEach(sl => { if (byStand[sl.id]?.result) sTotalShot++; }); }); });
+        document.getElementById('progress-bar').style.width = sTotalPossible > 0 ? `${(sTotalShot / sTotalPossible) * 100}%` : '0%';
+        const n = r.shooterIds.length;
+        const leadIdx = n ? r.activeIdx % n : 0;
+        const isTagging = st.slots.length === 0 || r.editingTagsForStandId === st.id;
+
+        let standNav = r.stands.map((s, i) => `<button onclick="jumpStand(${i})" class="glove-standnav flex-shrink-0 w-11 h-11 rounded-xl font-black text-xs border-2 ${r.activeIdx === i ? 'bg-orange-500 border-orange-500 text-white shadow-lg' : s.slots.length === 0 ? 'bg-white border-dashed border-slate-300 text-slate-300' : 'bg-white border-slate-200 text-slate-500'}">${i + 1}</button>`).join('');
+        standNav += `<button onclick="addStand()" class="glove-standnav flex-shrink-0 w-11 h-11 rounded-xl font-black text-xs border-2 border-dashed border-slate-300 text-slate-400">+</button>`;
+
+        let rows = '';
+        if (st.slots.length > 0) {
+            for (let i = 0; i < n; i++) {
+                const shId = r.shooterIds[(i + leadIdx) % n];
+                const p = getProfile(shId) || { name: 'Unknown' };
+                const byStand = r.hits[shId]?.[st.id] || {};
+                const count = st.slots.filter(sl => { const res = byStand[sl.id]?.result; return res === 'hit1' || res === 'hit2'; }).length;
+                let targetsHtml = '';
+                st.slots.forEach((slot, si) => {
+                    const cell = byStand[slot.id] || { result: null, missReason: null };
+                    targetsHtml += `
+                        <div class="glove-target-card border border-slate-200 rounded-lg p-1.5 bg-slate-50 min-w-[86px]">
+                            <div class="glove-target-label text-[7px] font-black uppercase text-slate-400 truncate mb-1">${slot.clayType}<br>${slot.presentation}<br>${slot.distance || ''}</div>
+                            <div class="flex gap-1">
+                                <button onclick="setHit('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 h-8 rounded-md font-black text-[9px] border ${(cell.result === 'hit1' || cell.result === 'hit2') ? 'hit-bg' : 'bg-white border-slate-300 text-slate-400'}">Hit</button>
+                                <button onclick="setMiss('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 h-8 rounded-md font-black text-[9px] border ${cell.result === 'miss' ? 'miss-bg' : 'bg-white border-slate-300 text-slate-400'}">Miss</button>
+                            </div>
+                            ${cell.result === 'miss' ? `<div class="flex flex-wrap gap-1 mt-1">${db.presets.missReasons.map(mr => `<span onclick="setMissReason('${shId}','${st.id}','${slot.id}','${mr}')" class="glove-missreason-chip chip ${cell.missReason === mr ? 'miss-active' : ''}" style="font-size:6px; padding:2px 5px;">${mr}</span>`).join('')}</div>` : ''}
+                        </div>`;
+                });
+                const shooterChoke = getShooterChoke(r, shId, st.id);
+                rows += `
+                    <div class="p-2.5 space-y-1.5 ${i === 0 ? 'bg-orange-50/40 first-up-highlight' : ''} ${r.isLocked ? 'pointer-events-none opacity-60' : ''}">
+                        <div class="flex justify-between items-center px-1">
+                            <div class="flex items-center gap-1.5"><span class="glove-shooter-name text-[11px] font-black uppercase truncate max-w-[110px] tracking-tight">${p.name}</span>${i === 0 ? '<span class="bg-orange-500 text-white text-[6px] px-1 rounded-full font-black uppercase">First Up</span>' : ''}</div>
+                            <div class="flex items-center gap-2">
+                                <select onchange="setShooterChoke('${shId}','${st.id}', this.value)" class="glove-choke-select text-[8px] font-bold bg-slate-50 border border-slate-200 rounded-md px-1 py-0.5">
+                                    <option value="">Choke —</option>
+                                    ${db.presets.chokes.map(c => `<option ${shooterChoke === c ? 'selected' : ''}>${c}</option>`).join('')}
+                                </select>
+                                <div class="glove-count text-base font-black italic text-slate-900">${count}<span class="text-slate-300 text-[8px] not-italic ml-0.5">/${st.slots.length}</span></div>
+                            </div>
+                        </div>
+                        <div class="flex gap-1.5 w-full overflow-x-auto pb-1 scrollbar-hide">${targetsHtml}</div>
+                    </div>`;
+            }
+        }
+        return `
+            <div id="stand-nav" class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide px-1">${standNav}</div>
+            <section class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+                <div class="bg-slate-900 px-3 py-2.5 text-white flex justify-between items-center">
+                    <h2 class="glove-stand-title text-lg font-black italic uppercase">Stand ${r.activeIdx + 1}</h2>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[9px] text-orange-400 font-bold uppercase">${st.slots.length} Targets</span>
+                        ${st.slots.length > 0 ? `<button onclick="toggleStandTagEdit('${st.id}')" class="glove-edit-btn text-[8px] bg-slate-800 text-white px-2 py-1 rounded-lg font-black uppercase">${isTagging ? 'Done' : 'Edit'}</button>` : ''}
+                    </div>
+                </div>
+                <div class="p-2.5">${isTagging ? renderStandTagPanel(st, r.activeIdx) : ''}</div>
+                ${st.slots.length === 0 ? `<p class="text-center text-[10px] font-bold text-slate-400 pb-4">Tag this stand's targets above to start scoring it.</p>` : `<div class="divide-y divide-slate-100">${rows}</div>`}
+                <div class="bg-slate-50 p-3 flex gap-3 border-t border-slate-200">
+                    <button onclick="scoringNav(-1)" ${r.activeIdx === 0 ? 'disabled' : ''} class="glove-nav-btn flex-1 bg-white border border-slate-300 py-3 rounded-xl text-xs font-black disabled:opacity-30 uppercase">Prev</button>
+                    ${r.activeIdx === r.stands.length - 1 ? `<button onclick="finishRound()" class="glove-nav-btn flex-1 bg-green-600 text-white py-3 rounded-xl text-xs font-black uppercase">Finish Round</button>` : `<button onclick="scoringNav(1)" class="glove-nav-btn flex-1 bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase">Next Stand</button>`}
+                </div>
+            </section>
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="p-2 bg-slate-100 border-b border-slate-200 text-[9px] font-black uppercase text-slate-500">Leaderboard</div>
+                <div class="overflow-x-auto">${renderLeaderboardTable(r)}</div>
+            </section>
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <label class="text-[9px] font-black uppercase text-slate-400 mb-1 flex items-center gap-1"><i data-lucide="sticky-note" size="10"></i> Round Notes</label>
+                <textarea oninput="r_upd('notes',this.value)" class="w-full h-16 bg-slate-50 rounded-xl p-3 text-xs font-bold outline-none resize-none">${r.notes}</textarea>
+            </section>`;
+    }
+    function jumpStand(i) { if (activeRound().isLocked) return; activeRound().activeIdx = i; saveDB(); render(); }
+    function toggleStandTagEdit(standId) {
+        const r = activeRound();
+        r.editingTagsForStandId = (r.editingTagsForStandId === standId) ? null : standId;
+        saveDB(); render();
+    }
+    function renderLeaderboardTable(r) {
+        const perf = r.shooterIds.map(id => ({ id, name: (getProfile(id) || {}).name || 'Unknown', total: shooterRoundTotal(r, id) })).sort((a, b) => b.total - a.total);
+        let head = `<tr class="bg-slate-50 font-black uppercase border-b border-slate-200"><th class="p-2 border-b text-left w-12">Stand</th>${perf.map(p => `<th class="p-1 border-b border-l border-slate-200 text-center"><div class="min-w-[50px]">${p.name}</div></th>`).join('')}</tr>`;
+        let body = r.stands.map((st, idx) => `<tr class="${r.activeIdx === idx ? 'bg-orange-50' : ''}"><td class="p-2 font-bold border-b text-slate-400 text-[8px]">ST ${idx + 1}</td>${perf.map(p => `<td class="p-2 text-center border-b border-l border-slate-100 font-black">${shooterStandTotal(r, p.id, st.id)}</td>`).join('')}</tr>`).join('');
+        let foot = `<tr class="bg-slate-900 text-white font-black"><td class="p-2 uppercase text-[7px]">Total</td>${perf.map(p => `<td class="p-2 text-center text-sm border-l border-slate-700">${p.total}</td>`).join('')}</tr>`;
+        return `<table class="w-full text-[10px]"><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table>`;
+    }
+
+    /* =========================================================================================
+       VIEW: HISTORY
+    ========================================================================================= */
+    function viewHistory() {
+        const rounds = [...db.history].sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0));
+        return `
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Round History</h3>
+                <div class="space-y-2">
+                    ${rounds.map(r => `
+                        <button onclick="db.historyRoundId='${r.id}'; goto('round-detail')" class="w-full text-left border border-slate-200 rounded-xl p-2.5 flex justify-between items-center">
+                            <div>
+                                <div class="text-xs font-black uppercase">${r.ground || 'Unnamed Ground'}</div>
+                                <div class="text-[9px] text-slate-400 font-bold">${getUKDate(r.date)} • ${r.event || 'No event name'} • ${r.stands.length} stands</div>
+                            </div>
+                            <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300"></i>
+                        </button>
+                    `).join('') || `<p class="text-[10px] text-slate-400 font-bold text-center py-4">No completed rounds yet.</p>`}
+                </div>
+            </section>`;
+    }
+
+    /* =========================================================================================
+       VIEW: ROUND DETAIL
+    ========================================================================================= */
+    function viewRoundDetail() {
+        const r = round_ref();
+        if (!r) return `<p class="text-center text-xs font-bold text-slate-400 py-8">Round not found.</p>`;
+        const perf = r.shooterIds.map(id => ({ id, name: (getProfile(id) || {}).name || 'Unknown Shooter', total: shooterRoundTotal(r, id), att: shooterRoundAttempts(r, id) })).sort((a, b) => b.total - a.total);
+        return `
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <h3 class="text-sm font-black uppercase">${r.ground || 'Unnamed Ground'}</h3>
+                <p class="text-[9px] text-slate-400 font-bold mb-2">${getUKDate(r.date)} • ${r.event || 'No event name'} • Wind: ${r.conditions.wind || '—'} • Light: ${r.conditions.light || '—'}</p>
+                <div class="overflow-x-auto">${renderLeaderboardTable(r)}</div>
+                ${r.notes ? `<p class="text-[10px] font-bold mt-2 bg-slate-50 rounded-lg p-2">${r.notes}</p>` : ''}
+            </section>
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Final Standings</h3>
+                <div class="space-y-1.5">
+                    ${perf.map((p, i) => `<div class="flex justify-between items-center p-2 rounded-lg ${i === 0 ? 'bg-orange-50' : 'bg-slate-50'}"><span class="text-xs font-black uppercase">${i + 1}. ${p.name}</span><span class="text-sm font-black">${p.total}/${p.att}</span></div>`).join('')}
+                </div>
+            </section>
+            <button onclick="db.historyRoundId=null; goto('history')" class="w-full bg-white border border-slate-300 py-3 rounded-xl text-xs font-black uppercase">← Back to History</button>`;
+    }
+
+    /* =========================================================================================
+       VIEW: ANALYSIS
+    ========================================================================================= */
+    function barRow(label, pct, attempts, lowSample) {
+        return `<div class="space-y-0.5">
+            <div class="flex justify-between text-[9px] font-black uppercase"><span class="truncate max-w-[70%]">${label}${lowSample ? ' <span class=\"text-slate-300\">(low sample)</span>' : ''}</span><span>${pct}% <span class="text-slate-300">(${attempts})</span></span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:${pct}%; ${lowSample ? 'opacity:0.4;' : ''}"></div></div>
+        </div>`;
+    }
+    function viewAnalysis() {
+        if (db.profiles.length === 0) return `<p class="text-center text-xs font-bold text-slate-400 py-8">Add a shooter profile first.</p>`;
+        if (!db.analysisShooterId || !getProfile(db.analysisShooterId)) db.analysisShooterId = (getMainUser() || db.profiles[0]).id;
+        const shooterId = db.analysisShooterId;
+        const shots = getAllShots({ shooterId });
+        const byType = pctBy(shots, s => s.clayType);
+        const byPres = pctBy(shots, s => s.presentation);
+        const byDistance = pctBy(shots.filter(s => s.distance), s => s.distance);
+        const byPresDistance = pctBy(shots.filter(s => s.distance), s => s.presentation + ' — ' + s.distance);
+        const byGround = pctBy(shots, s => s.ground);
+        const byChoke = pctBy(shots, s => s.choke);
+        const barrels = barrelSplit(shots);
+        const best = bestRound(shooterId);
+        const missReasons = pctBy(shots.filter(s => s.result === 'miss' && s.missReason), s => s.missReason, 1);
+        const fatigue = fatigueBuckets(shots);
+        const trend = trendByDate(shots);
+        const rollingAvg = rollingAverage(shooterId, db.avgWindow);
+        const weakestType = byType.find(t => !t.lowSample);
+        const weakestPres = byPres.find(t => !t.lowSample);
+        const weakestDistance = byDistance.find(t => !t.lowSample);
+        const p = getProfile(shooterId);
+        const careerHits = shots.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
+        const careerTotals = { shots: shots.length, hits: careerHits, misses: shots.length - careerHits, pct: shots.length ? Math.round(careerHits / shots.length * 100) : 0 };
+
+        return `
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <div class="flex items-center justify-between">
+                    <label class="text-[9px] font-black uppercase text-slate-400">Shooter</label>
+                    ${p.isMainUser ? `<span class="chip active" style="background:#f97316; border-color:#f97316;"><i data-lucide="star" size="9"></i> My Stats</span>` : ''}
+                </div>
+                <select onchange="db.analysisShooterId=this.value; saveDB(); render();" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-black mt-1">
+                    ${db.profiles.map(pr => `<option value="${pr.id}" ${shooterId === pr.id ? 'selected' : ''}>${pr.isMainUser ? '★ ' : ''}${pr.name}${pr.isMainUser ? ' (Me)' : ''}</option>`)}
+                </select>
+                <button onclick="resetShooterStats('${shooterId}')" class="w-full mt-2 bg-red-50 border border-red-200 text-red-600 py-2 rounded-xl text-[9px] font-black uppercase">Reset This Shooter's Stats</button>
+            </section>
+
+            ${p.isMainUser && (p.cpsaAverage || p.cpsaIssue) ? `<section class="bg-white rounded-xl shadow-sm border border-orange-200 p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-orange-500 mb-1">CPSA Record</h3>
+                <div class="grid grid-cols-3 gap-2 text-center">
+                    <div><div class="text-lg font-black">${p.class}</div><div class="text-[7px] font-black uppercase text-slate-400">Classification</div></div>
+                    <div><div class="text-lg font-black">${p.cpsaAverage || '—'}${p.cpsaAverage ? '%' : ''}</div><div class="text-[7px] font-black uppercase text-slate-400">Average</div></div>
+                    <div><div class="text-lg font-black">${p.cpsaIssue || '—'}</div><div class="text-[7px] font-black uppercase text-slate-400">Issue</div></div>
+                </div>
+                ${p.cpsaUpdated ? `<div class="text-[7px] text-slate-400 font-bold text-center mt-1">Updated ${new Date(p.cpsaUpdated).toLocaleDateString('en-GB')} — edit in Shooter Profiles</div>` : ''}
+            </section>` : ''}
+
+            ${shots.length === 0 ? `<p class="text-center text-[10px] font-bold text-slate-400 py-6">No tagged shots yet for ${p.name}. Score a round with stand tagging to see analysis here.</p>` : `
+
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Career Totals</h3>
+                <div class="grid grid-cols-4 gap-2 text-center">
+                    <div><div class="text-xl font-black">${careerTotals.shots}</div><div class="text-[7px] font-black uppercase text-slate-400">Shots Fired</div></div>
+                    <div><div class="text-xl font-black text-green-600">${careerTotals.hits}</div><div class="text-[7px] font-black uppercase text-slate-400">Hits</div></div>
+                    <div><div class="text-xl font-black text-red-500">${careerTotals.misses}</div><div class="text-[7px] font-black uppercase text-slate-400">Misses</div></div>
+                    <div><div class="text-xl font-black text-orange-500">${careerTotals.pct}%</div><div class="text-[7px] font-black uppercase text-slate-400">Accuracy</div></div>
+                </div>
+            </section>
+
+            <section class="bg-slate-900 text-white rounded-xl shadow-sm p-3">
+                <div class="grid grid-cols-3 gap-2 text-center">
+                    <div><div class="text-2xl font-black">${rollingAvg !== null ? rollingAvg + '%' : '—'}</div><div class="text-[8px] font-black uppercase text-slate-400">Rolling Avg (last ${db.avgWindow} rounds)</div></div>
+                    <div><div class="text-2xl font-black">${barrels.total ? barrels.pctFirst + '%' : '—'}</div><div class="text-[8px] font-black uppercase text-slate-400">Hits on 1st Barrel</div></div>
+                    <div><div class="text-2xl font-black">${barrels.total ? barrels.pctSecond + '%' : '—'}</div><div class="text-[8px] font-black uppercase text-slate-400">Hits on 2nd Barrel</div></div>
+                </div>
+                <p class="text-[8px] text-slate-500 font-bold text-center mt-2 uppercase">Rolling average is a simple mean of past round hit% — not an official CPSA classification average. Barrel % is share of hits, not attempts.</p>
+            </section>
+
+            ${weakestType ? `<section class="bg-orange-50 border border-orange-200 rounded-xl p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-orange-500 mb-1">Coaching Focus</h3>
+                <div class="text-[9px] font-black uppercase text-orange-600">Weakest clay type: ${weakestType.key} (${weakestType.pct}%)</div>
+                ${weakestPres ? `<div class="text-[9px] font-black uppercase text-orange-600 mt-1">Weakest presentation: ${weakestPres.key} (${weakestPres.pct}%)</div>` : ''}
+                ${weakestDistance ? `<div class="text-[9px] font-black uppercase text-orange-600 mt-1">Weakest distance: ${weakestDistance.key} (${weakestDistance.pct}%)</div>` : ''}
+            </section>` : ''}
+
+            ${best ? `<section class="bg-green-50 border border-green-200 rounded-xl p-3">
+                <div class="text-[9px] font-black uppercase text-green-700">All-Time Best Round: ${best.ground} — ${getUKDate(best.date)}${best.event ? ' (' + best.event + ')' : ''}</div>
+                <div class="text-lg font-black text-green-700">${best.total}/${best.att} <span class="text-xs">(${best.pct}%)</span></div>
+                <button onclick="db.historyRoundId='${best.roundId}'; goto('round-detail')" class="text-[9px] font-black uppercase text-green-700 underline">View this round →</button>
+            </section>` : ''}
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Clay Type</h3>
+                    ${byType.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                </section>
+
+                <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Presentation</h3>
+                    ${byPres.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                </section>
+
+                ${byDistance.length ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Distance</h3>
+                    ${byDistance.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                </section>` : ''}
+
+                ${byGround.length > 1 ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Ground</h3>
+                    ${byGround.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                </section>` : ''}
+
+                ${byChoke.length > 1 ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Choke</h3>
+                    ${byChoke.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                </section>` : ''}
+            </div>
+
+            ${byPresDistance.length ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Presentation × Distance</h3>
+                <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">e.g. spot far crossers vs close crossers</p>
+                ${byPresDistance.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+            </section>` : ''}
+
+            ${missReasons.length ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Miss Reasons (tagged misses only)</h3>
+                ${missReasons.map(t => `<div class="flex justify-between text-[9px] font-black uppercase"><span>${t.key}</span><span>${t.attempts}</span></div>`).join('')}
+            </section>` : ''}
+
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Fatigue — Hit % by Position in Round</h3>
+                ${fatigue.map(t => barRow(t.key, t.pct, t.attempts, false)).join('')}
+            </section>
+
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Trend Over Time</h3>
+                ${trend.length ? `<div style="position:relative; height:160px;"><canvas id="trend-chart"></canvas></div>` : `<p class="text-[9px] text-slate-400 font-bold text-center py-2">Not enough tagged rounds yet to show a trend.</p>`}
+            </section>
+
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Goals</h3>
+                    <button onclick="addGoal('${shooterId}')" class="text-[9px] bg-slate-900 text-white px-3 py-1 rounded-lg font-black uppercase">+ Add Goal</button>
+                </div>
+                <div class="space-y-2">
+                    ${(p.goals || []).map(g => {
+                        const prog = goalProgress(shooterId, g);
+                        return `<div class="border border-slate-200 rounded-xl p-2 space-y-1.5">
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <select onchange="updateGoal('${shooterId}','${g.id}','metricType',this.value)" class="bg-slate-50 rounded-md p-1.5 text-[9px] font-bold"><option value="clayType" ${g.metricType==='clayType'?'selected':''}>Clay Type</option><option value="presentation" ${g.metricType==='presentation'?'selected':''}>Presentation</option><option value="distance" ${g.metricType==='distance'?'selected':''}>Distance</option></select>
+                                <select onchange="updateGoal('${shooterId}','${g.id}','metricValue',this.value)" class="bg-slate-50 rounded-md p-1.5 text-[9px] font-bold">${metricPresetList(g.metricType).map(v => `<option ${g.metricValue === v ? 'selected' : ''}>${v}</option>`).join('')}</select>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-[8px] font-black uppercase text-slate-400">Target %</span>
+                                <input type="number" value="${g.targetPct}" onchange="updateGoal('${shooterId}','${g.id}','targetPct',this.value)" class="w-16 bg-slate-50 rounded-md p-1 text-[9px] font-bold">
+                                <button onclick="removeGoal('${shooterId}','${g.id}')" class="ml-auto text-red-400"><i data-lucide="trash-2" size="14"></i></button>
+                            </div>
+                            <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100, prog.pct)}%; ${prog.pct >= g.targetPct ? 'background:#16a34a;' : ''}"></div></div>
+                            <div class="text-[8px] font-black uppercase text-slate-400">${prog.pct}% currently (${prog.attempts} shots) vs ${g.targetPct}% target</div>
+                        </div>`;
+                    }).join('') || `<p class="text-[9px] text-slate-400 font-bold text-center py-2">No goals set yet.</p>`}
+                </div>
+            </section>
+            `}`;
+    }
+
+    /* =========================================================================================
+       VIEW: SETTINGS
+    ========================================================================================= */
+    function presetEditor(title, listName) {
+        return `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+            <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">${title}</h3>
+            <div class="flex flex-wrap gap-1.5 mb-2">
+                ${db.presets[listName].map(v => `<span class="chip active">${v} <i onclick="removePreset('${listName}','${v.replace(/'/g, "\\'")}')" data-lucide="x" size="10"></i></span>`).join('')}
+            </div>
+            <div class="flex gap-1.5">
+                <input type="text" id="new-${listName}" placeholder="Add new..." class="flex-1 bg-slate-50 rounded-lg p-2 text-xs font-bold">
+                <button onclick="addPreset('${listName}', document.getElementById('new-${listName}').value); document.getElementById('new-${listName}').value='';" class="bg-slate-900 text-white px-3 rounded-lg text-[9px] font-black uppercase">Add</button>
+            </div>
+        </section>`;
+    }
+    function viewSettings() {
+        return `
+            ${presetEditor('Clay Types', 'clayTypes')}
+            ${presetEditor('Presentations', 'presentations')}
+            ${presetEditor('Miss Reasons', 'missReasons')}
+            ${presetEditor('Chokes', 'chokes')}
+            ${presetEditor('Cartridges', 'cartridges')}
+            ${presetEditor('Distance Bands', 'distanceBands')}
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <div class="flex justify-between items-center">
+                    <div class="pr-3">
+                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Glove Mode</h3>
+                        <p class="text-[9px] text-slate-400 font-bold mt-1">Bigger buttons, cards and text on the scoring screen — for shooting in gloves or cold weather. Also toggleable from a hand icon in the scoring screen's header.</p>
+                    </div>
+                    <button onclick="toggleGloveMode()" class="${db.gloveMode ? 'bg-orange-500' : 'bg-slate-200'} w-12 h-7 rounded-full relative flex-shrink-0">
+                        <span class="absolute top-0.5 ${db.gloveMode ? 'left-6' : 'left-0.5'} w-6 h-6 bg-white rounded-full shadow"></span>
+                    </button>
+                </div>
+            </section>
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Rolling Average Window</h3>
+                <div class="flex items-center gap-2">
+                    <input type="number" min="1" max="50" value="${db.avgWindow}" onchange="db.avgWindow=parseInt(this.value)||6; saveDB();" class="w-20 bg-slate-50 rounded-lg p-2 text-xs font-bold">
+                    <span class="text-[9px] text-slate-400 font-bold uppercase">rounds used for the Analysis rolling average</span>
+                </div>
+            </section>
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Backup &amp; Restore</h3>
+                <p class="text-[9px] text-slate-400 font-bold mb-2">All your data lives in this browser only. Export a backup regularly so a cleared cache or new device doesn't lose your history.</p>
+                <div class="flex gap-2">
+                    <button onclick="exportBackup()" class="flex-1 bg-slate-900 text-white py-2.5 rounded-xl text-[10px] font-black uppercase">Export Backup</button>
+                    <button onclick="triggerImport()" class="flex-1 bg-white border border-slate-300 py-2.5 rounded-xl text-[10px] font-black uppercase">Restore Backup</button>
+                </div>
+            </section>
+            <section class="bg-white rounded-xl shadow-sm border border-red-200 p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-red-400 mb-2">Danger Zone</h3>
+                <button onclick="resetAllData()" class="w-full bg-red-50 border border-red-200 text-red-600 py-2.5 rounded-xl text-[10px] font-black uppercase">Erase All Data</button>
+            </section>`;
+    }
+
+    /* =========================================================================================
+       INIT
+    ========================================================================================= */
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW Registration failed', err)); });
+    }
+    window.onload = () => { loadDB(); render(); };
+    </script>
+</body>
+</html>
