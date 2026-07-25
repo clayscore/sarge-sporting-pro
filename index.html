@@ -240,10 +240,15 @@
         db.profiles.push({ id: newId(), name: `Shooter ${db.profiles.length + 1}`, cpsa: '', class: 'U', createdAt: Date.now(), isMainUser: false, guns: [], cpsaAverage: '', cpsaIssue: '', cpsaUpdated: null });
         saveDB(); render();
     }
+    /* Deliberately does NOT call render(). These are bound to `oninput`, so re-rendering
+       on every keystroke rebuilt the whole view and destroyed the <input> being typed
+       into - which drops focus and makes Android dismiss the keyboard after each
+       character. Saving without re-rendering keeps the field alive and focused; the
+       "Last updated" line refreshes on the next natural render, which is soon enough. */
     function updateCpsaRecord(id, field, value) {
         const p = getProfile(id); if (!p) return;
         p[field] = value; p.cpsaUpdated = Date.now();
-        saveDB(); render();
+        saveDB();
     }
     function updateProfile(id, field, value) { const p = getProfile(id); if (p) { p[field] = value; saveDB(); } }
     function deleteProfile(id) {
@@ -538,6 +543,19 @@
         let t = 0;
         round.stands.forEach(st => { const byStand = round.hits[shooterId]?.[st.id] || {}; st.slots.forEach(sl => { if (byStand[sl.id]?.result) t++; }); });
         return t;
+    }
+    /* Permanently removes a completed round from history. This also removes every shot
+       it contributed to the analysis engine (getAllShots reads straight from db.history),
+       so deleting test/dummy rounds cleanly restores real stats - including gun shot
+       counts, which are derived from rounds rather than stored separately. */
+    function deleteRound(roundId) {
+        const r = db.history.find(x => x.id === roundId);
+        if (!r) return;
+        const label = `${r.ground || 'Unnamed Ground'} (${getUKDate(r.date)})`;
+        if (!confirm(`Delete the round at ${label}? Every shot from it is removed from your stats and analysis too. This cannot be undone.`)) return;
+        db.history = db.history.filter(x => x.id !== roundId);
+        if (db.historyRoundId === roundId) { db.historyRoundId = null; db.view = 'history'; }
+        saveDB(); render();
     }
     function finishRound() {
         const r = activeRound();
@@ -975,8 +993,8 @@
                 <div class="text-[8px] font-black uppercase text-orange-500 mb-1">My CPSA Record</div>
                 <p class="text-[8px] text-slate-400 font-bold mb-1.5">Classification uses the Class field above. Copy your average/issue from your CPSA login — this app can't fetch it automatically (no server, and CPSA's averages page requires login).</p>
                 <div class="grid grid-cols-2 gap-1.5 mb-1.5">
-                    <input type="text" value="${p.cpsaAverage || ''}" placeholder="Average % e.g. 78.5" oninput="updateCpsaRecord('${p.id}','cpsaAverage',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
-                    <input type="text" value="${p.cpsaIssue || ''}" placeholder="Issue e.g. 82" oninput="updateCpsaRecord('${p.id}','cpsaIssue',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
+                    <input type="text" inputmode="decimal" value="${p.cpsaAverage || ''}" placeholder="Average % e.g. 78.5" oninput="updateCpsaRecord('${p.id}','cpsaAverage',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
+                    <input type="text" inputmode="numeric" value="${p.cpsaIssue || ''}" placeholder="Issue e.g. 82" oninput="updateCpsaRecord('${p.id}','cpsaIssue',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
                 </div>
                 ${p.cpsaUpdated ? `<div class="text-[7px] text-slate-400 font-bold mb-2">Last updated ${new Date(p.cpsaUpdated).toLocaleDateString('en-GB')}</div>` : ''}
                 <div class="text-[8px] font-black uppercase text-orange-500 mb-1 pt-1.5 border-t border-orange-100">My Cabinet</div>
@@ -1311,13 +1329,16 @@
                 <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Round History</h3>
                 <div class="space-y-2">
                     ${rounds.map(r => `
-                        <button onclick="db.historyRoundId='${r.id}'; goto('round-detail')" class="w-full text-left border border-slate-200 rounded-xl p-2.5 flex justify-between items-center">
-                            <div>
-                                <div class="text-xs font-black uppercase">${r.ground || 'Unnamed Ground'}</div>
-                                <div class="text-[9px] text-slate-400 font-bold">${getUKDate(r.date)} • ${r.event || 'No event name'} • ${r.stands.length} stands</div>
-                            </div>
-                            <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300"></i>
-                        </button>
+                        <div class="border border-slate-200 rounded-xl flex items-center">
+                            <button onclick="db.historyRoundId='${r.id}'; goto('round-detail')" class="flex-1 text-left p-2.5 flex justify-between items-center min-w-0">
+                                <div class="min-w-0">
+                                    <div class="text-xs font-black uppercase truncate">${r.ground || 'Unnamed Ground'}</div>
+                                    <div class="text-[9px] text-slate-400 font-bold truncate">${getUKDate(r.date)} • ${r.event || 'No event name'} • ${r.stands.length} stands</div>
+                                </div>
+                                <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 flex-shrink-0"></i>
+                            </button>
+                            <button onclick="deleteRound('${r.id}')" title="Delete round" class="px-3 py-2.5 text-red-400 border-l border-slate-200 flex-shrink-0"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
                     `).join('') || `<p class="text-[10px] text-slate-400 font-bold text-center py-4">No completed rounds yet.</p>`}
                 </div>
             </section>`;
@@ -1343,7 +1364,10 @@
                     ${perf.map((p, i) => `<div class="flex justify-between items-center p-2 rounded-lg ${i === 0 ? 'bg-orange-50' : 'bg-slate-50'}"><span class="text-xs font-black uppercase">${i + 1}. ${p.name}</span><span class="text-sm font-black">${p.total}/${p.att}</span></div>`).join('')}
                 </div>
             </section>
-            <button onclick="db.historyRoundId=null; goto('history')" class="w-full bg-white border border-slate-300 py-3 rounded-xl text-xs font-black uppercase">← Back to History</button>`;
+            <div class="flex gap-2">
+                <button onclick="db.historyRoundId=null; goto('history')" class="flex-1 bg-white border border-slate-300 py-3 rounded-xl text-xs font-black uppercase">← Back to History</button>
+                <button onclick="deleteRound('${r.id}')" class="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-xs font-black uppercase">Delete</button>
+            </div>`;
     }
 
     /* =========================================================================================
