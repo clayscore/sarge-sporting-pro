@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sarge-sporting-v17';
+const CACHE_NAME = 'sarge-sporting-v23';
 const ICON_URL = 'https://img.icons8.com/ios-filled/512/target.png';
 const ASSETS = [
   './',

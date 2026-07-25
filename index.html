@@ -184,7 +184,7 @@
         };
     }
     function defaultDB() {
-        return { profiles: [], presets: defaultPresets(), history: [], activeRound: null, view: 'home', analysisShooterId: null, historyRoundId: null, avgWindow: 6, gloveMode: false };
+        return { profiles: [], presets: defaultPresets(), history: [], activeRound: null, view: 'home', analysisShooterId: null, historyRoundId: null, avgWindow: 6, gloveMode: false, groundLocations: {} };
     }
     let db = defaultDB();
     // Glove mode scales up buttons/cards/dropdowns on the scoring screen for
@@ -213,7 +213,7 @@
         return {
             id: newId(), createdAt: Date.now(), finishedAt: null, setupComplete: false, wizardStep: 'info',
             ground: '', date: new Date().toISOString().split('T')[0], event: '', notes: '', discipline: 'ESP',
-            conditions: { wind: '', light: '' }, equipment: { gunId: '', gunName: '', cartridge: '' },
+            conditions: { wind: '', light: '', auto: null, readings: [], note: '' }, equipment: { gunId: '', gunName: '', cartridge: '' },
             shooterIds: [], stands: [], hits: {}, chokes: {}, activeIdx: 0, isLocked: false, editingTagsForStandId: null,
             expandedMissKey: null
         };
@@ -236,8 +236,25 @@
     /* =========================================================================================
        PROFILES
     ========================================================================================= */
+    function newProfile(name) {
+        return { id: newId(), name: (name || '').trim() || `Shooter ${db.profiles.length + 1}`, cpsa: '', class: 'U', createdAt: Date.now(), isMainUser: false, guns: [], cpsaAverage: '', cpsaIssue: '', cpsaUpdated: null };
+    }
     function addProfile() {
-        db.profiles.push({ id: newId(), name: `Shooter ${db.profiles.length + 1}`, cpsa: '', class: 'U', createdAt: Date.now(), isMainUser: false, guns: [], cpsaAverage: '', cpsaIssue: '', cpsaUpdated: null });
+        db.profiles.push(newProfile());
+        saveDB(); render();
+    }
+    /* Creates a named shooter straight from the Pick Squad screen and drops them into
+       the squad in one step - previously you had to add an unnamed "Shooter N" here (or
+       go out to the Profiles screen), rename them there, then come back and tick them.
+       Auto-selecting into the squad is the obvious intent: you only add someone on this
+       screen because they're shooting this round. */
+    function addSquadShooter(name) {
+        const trimmed = (name || '').trim();
+        if (!trimmed) return;
+        const p = newProfile(trimmed);
+        db.profiles.push(p);
+        const r = activeRound();
+        if (r && !r.shooterIds.includes(p.id)) r.shooterIds.push(p.id);
         saveDB(); render();
     }
     /* Deliberately does NOT call render(). These are bound to `oninput`, so re-rendering
@@ -307,6 +324,144 @@
         const g = (p.guns || []).find(g => g.id === gunId); if (!g) return;
         g.maintenanceLog = (g.maintenanceLog || []).filter(e => e.id !== entryId);
         saveDB(); render();
+    }
+
+    /* =========================================================================================
+       WEATHER (Open-Meteo)
+
+       Uses Open-Meteo: free, no API key, and CORS-enabled, so a static PWA with no backend
+       can call it straight from the browser - which is the only reason this is buildable
+       here at all. Non-commercial use is free up to 10k calls/day; this app makes one call
+       per round, so that's not a concern.
+
+       Design notes:
+       - Coordinates are saved PER GROUND (keyed on the lowercased ground name) the first
+         time you fetch there. Every later round at that ground needs no GPS fix at all,
+         which matters because shooting grounds often have poor signal and a cold GPS lock
+         can take a while.
+       - The numeric readings (mph, direction, temp, cloud %, precipitation) are stored in
+         full on the round. The existing Calm/Breezy/Windy and Bright/Overcast/Flat bands
+         are ALSO auto-filled from them, but the raw numbers are the valuable bit for
+         analysis later - bands lose too much detail.
+       - Everything degrades gracefully: no signal, denied permission or a failed request
+         just shows a message and leaves the manual dropdowns exactly as they were. Weather
+         must never block starting or scoring a round.
+       - IMPORTANT: the band mapping only applies a value if it actually exists in the
+         user's own preset list, since those lists are editable in Settings. If Paul
+         renames or removes "Breezy", auto-fill silently skips rather than writing a value
+         that isn't a valid option.
+    ========================================================================================= */
+    let weatherState = { loading: false, error: null };
+    function groundKey(name) { return (name || '').trim().toLowerCase(); }
+    function cardinalDir(deg) {
+        if (deg == null || isNaN(deg)) return '';
+        const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+        return dirs[Math.round((deg % 360) / 22.5) % 16];
+    }
+    // Bands chosen for what actually changes clay behaviour rather than strict Beaufort.
+    function windBandFor(mph) {
+        if (mph == null || isNaN(mph)) return '';
+        if (mph < 4) return 'Calm';
+        if (mph <= 12) return 'Breezy';
+        return 'Windy';
+    }
+    function lightBandFor(cloudPct) {
+        if (cloudPct == null || isNaN(cloudPct)) return '';
+        if (cloudPct < 30) return 'Bright';
+        if (cloudPct <= 75) return 'Overcast';
+        return 'Flat/Dull';
+    }
+    function getDeviceCoords() {
+        return new Promise((resolve, reject) => {
+            if (!navigator.geolocation) { reject(new Error('This device has no location support.')); return; }
+            navigator.geolocation.getCurrentPosition(
+                pos => resolve({ lat: +pos.coords.latitude.toFixed(4), lon: +pos.coords.longitude.toFixed(4) }),
+                err => reject(new Error(err && err.code === 1 ? 'Location permission denied — allow it, or set the conditions by hand.' : 'Could not get a location fix.')),
+                { enableHighAccuracy: false, timeout: 12000, maximumAge: 600000 }
+            );
+        });
+    }
+    function savedGroundCoords(name) {
+        const k = groundKey(name);
+        return (k && db.groundLocations && db.groundLocations[k]) || null;
+    }
+    async function fetchRoundWeather() {
+        const r = activeRound();
+        if (!r) return;
+        weatherState = { loading: true, error: null };
+        render();
+        try {
+            const k = groundKey(r.ground);
+            let coords = savedGroundCoords(r.ground);
+            if (!coords) {
+                coords = await getDeviceCoords();
+                if (k) {
+                    if (!db.groundLocations) db.groundLocations = {};
+                    db.groundLocations[k] = { lat: coords.lat, lon: coords.lon, savedAt: Date.now() };
+                }
+            }
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}`
+                + `&current=temperature_2m,wind_speed_10m,wind_direction_10m,cloud_cover,precipitation&wind_speed_unit=mph`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('Weather service returned ' + res.status + '.');
+            const data = await res.json();
+            // Handle both the newer `current` block and the older `current_weather` shape.
+            const c = data.current || data.current_weather || {};
+            const num = v => (v === null || v === undefined || isNaN(v)) ? null : Number(v);
+            const windMph = num(c.wind_speed_10m !== undefined ? c.wind_speed_10m : c.windspeed);
+            const windDir = num(c.wind_direction_10m !== undefined ? c.wind_direction_10m : c.winddirection);
+            const tempC = num(c.temperature_2m !== undefined ? c.temperature_2m : c.temperature);
+            const cloudPct = num(c.cloud_cover);
+            const precipMm = num(c.precipitation);
+            if (windMph === null && tempC === null && cloudPct === null) throw new Error('Weather service sent no usable readings.');
+            const reading = {
+                tempC, windMph, windDir, windCardinal: cardinalDir(windDir), cloudPct, precipMm,
+                fetchedAt: Date.now(), lat: coords.lat, lon: coords.lon,
+                standIdx: (r.setupComplete && typeof r.activeIdx === 'number') ? r.activeIdx + 1 : null
+            };
+            r.conditions.auto = reading;
+            // Keep every reading, not just the latest: re-checking mid-round would
+            // otherwise wipe the start-of-round conditions, which defeats the point of
+            // re-checking at all. `auto` stays as "current" for all the existing display
+            // code; `readings` is the log a long round can be reconstructed from.
+            if (!Array.isArray(r.conditions.readings)) r.conditions.readings = [];
+            r.conditions.readings.push(reading);
+            const wb = windBandFor(windMph);
+            if (wb && (db.presets.windOptions || []).includes(wb)) r.conditions.wind = wb;
+            const lb = lightBandFor(cloudPct);
+            if (lb && (db.presets.lightOptions || []).includes(lb)) r.conditions.light = lb;
+            weatherState = { loading: false, error: null };
+        } catch (e) {
+            weatherState = { loading: false, error: (e && e.message) || 'Could not get the weather.' };
+        }
+        saveDB(); render();
+    }
+    /* Fires when the ground name field loses focus. Only auto-fetches for a ground we
+       already have coordinates for - a brand new ground needs GPS, and springing a
+       permission prompt on someone mid-typing is rude, so that stays an explicit tap. */
+    function maybeAutoFetchWeather() {
+        const r = activeRound();
+        if (!r || r.conditions.auto || weatherState.loading) return;
+        if (savedGroundCoords(r.ground)) fetchRoundWeather();
+    }
+    function clearRoundWeather() {
+        const r = activeRound();
+        if (!r) return;
+        r.conditions.auto = null;
+        r.conditions.readings = [];
+        weatherState = { loading: false, error: null };
+        saveDB(); render();
+    }
+    /* Compact one-line summary of a reading, reused on the scoring screen and in round
+       detail so the format can't drift between them. */
+    function weatherSummary(a) {
+        if (!a) return '';
+        const bits = [];
+        if (a.windMph != null) bits.push(Math.round(a.windMph) + 'mph' + (a.windCardinal ? ' ' + a.windCardinal : ''));
+        if (a.tempC != null) bits.push(Math.round(a.tempC) + '°C');
+        if (a.cloudPct != null) bits.push(Math.round(a.cloudPct) + '% cloud');
+        if (a.precipMm) bits.push(a.precipMm + 'mm rain');
+        return bits.join(' • ');
     }
 
     /* =========================================================================================
@@ -665,6 +820,7 @@
                             standId: st.id, standPos: standPos + 1, standTotal: r.stands.length,
                             clayType: slot.clayType, presentation: slot.presentation, pairType: slot.pairType,
                             distance: slot.distance || '(not set)',
+                            wind: r.conditions?.wind || '(not set)', light: r.conditions?.light || '(not set)',
                             choke: getShooterChoke(r, shId, st.id) || '(not set)', result: cell.result, missReason: cell.missReason
                         });
                     });
@@ -673,13 +829,106 @@
         });
         return shots;
     }
+    /* CONFIDENCE / SAMPLE SIZE
+       A hit rate from a handful of targets is mostly noise: 3 from 8 on battues is not a
+       weakness, it's a coin toss. Acting on that wastes practice time on a problem that
+       may not exist, which is the single easiest way for a shooter to spin their wheels.
+
+       Uses a Wilson score interval rather than the textbook normal approximation, because
+       the normal one behaves badly exactly where this app lives - small samples and
+       proportions near 0% or 100% (it happily produces intervals below 0 or above 100).
+       Wilson stays sensible at those extremes.
+
+       A subgroup is only called a genuine difference when its interval sits entirely
+       above or below the shooter's own overall average - i.e. the difference survives the
+       uncertainty rather than being explainable by it. */
+    function wilsonInterval(hits, n, z = 1.96) {
+        if (!n) return { lo: 0, hi: 100, half: 50 };
+        const p = hits / n;
+        const denom = 1 + (z * z) / n;
+        const centre = (p + (z * z) / (2 * n)) / denom;
+        const half = (z / denom) * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
+        return {
+            lo: Math.max(0, Math.round((centre - half) * 100)),
+            hi: Math.min(100, Math.round((centre + half) * 100)),
+            half: Math.round(half * 100)
+        };
+    }
+    /* Roughly how many MORE attempts are needed to pin a rate down to +/- marginPct.
+       Standard sample-size formula; an estimate, not a promise, since it uses the current
+       (itself uncertain) hit rate. Good enough to answer "is this worth chasing yet?". */
+    function shotsNeededFor(hits, n, marginPct = 10) {
+        const p = n ? hits / n : 0.5;
+        const z = 1.96, E = marginPct / 100;
+        const need = Math.ceil((z * z * p * (1 - p)) / (E * E));
+        return Math.max(0, need - n);
+    }
     function pctBy(shots, keyFn, minSample = 5) {
         const groups = {};
         shots.forEach(s => { const k = keyFn(s) || '(untagged)'; (groups[k] = groups[k] || []).push(s); });
         return Object.entries(groups).map(([key, arr]) => {
             const hits = arr.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
-            return { key, attempts: arr.length, hits, pct: arr.length ? Math.round(hits / arr.length * 100) : 0, lowSample: arr.length < minSample };
+            const ci = wilsonInterval(hits, arr.length);
+            return {
+                key, attempts: arr.length, hits,
+                pct: arr.length ? Math.round(hits / arr.length * 100) : 0,
+                lowSample: arr.length < minSample,
+                ci, needMore: shotsNeededFor(hits, arr.length, 10)
+            };
         }).sort((a, b) => a.pct - b.pct);
+    }
+    /* TIERED EVIDENCE
+       Paul asked for useful output from ~50 targets rather than waiting for a few hundred.
+       Straight-up lowering the bar would have re-created the exact problem the confidence
+       work exists to stop, so instead evidence is TIERED and each tier is labelled for
+       what it is:
+
+         firm  - 95% interval sits clear of the shooter's average. Act on it.
+         early - 80% interval sits clear. A lead worth investigating, explicitly NOT a
+                 diagnosis. 80% is a normal exploratory threshold: roughly a 1-in-5 chance
+                 of chasing a ghost, which is a fair trade when the alternative is no
+                 direction at all for months.
+         none  - genuinely can't tell yet.
+
+       EARLY_MIN_ATTEMPTS stops the early tier firing on a truly tiny subgroup, where even
+       an 80% interval is meaningless. Kept at 8 so a ~50-target round can produce signals
+       across a handful of presentations. */
+    const ANY_MIN_ATTEMPTS = 6;
+    const EARLY_MIN_ATTEMPTS = 8;
+    const Z_FIRM = 1.96;   // 95%
+    const Z_EARLY = 1.2816; // 80%
+    function evidenceTier(hits, attempts, baselinePct) {
+        /* Hard floor before ANY claim. Worth noting this is a credibility judgement, not a
+           statistical one: 0 from 4 against a 60% average genuinely clears a 95% interval
+           (about a 2.6% likelihood), so the maths would happily call it confirmed. But
+           telling a shooter a weakness is "confirmed" off four targets would rightly look
+           absurd and cost trust in every other number on the screen. */
+        if (attempts < ANY_MIN_ATTEMPTS) return { tier: 'none', direction: null };
+        const firm = wilsonInterval(hits, attempts, Z_FIRM);
+        if (firm.hi < baselinePct) return { tier: 'firm', direction: 'weak' };
+        if (firm.lo > baselinePct) return { tier: 'firm', direction: 'strong' };
+        if (attempts >= EARLY_MIN_ATTEMPTS) {
+            const early = wilsonInterval(hits, attempts, Z_EARLY);
+            if (early.hi < baselinePct) return { tier: 'early', direction: 'weak' };
+            if (early.lo > baselinePct) return { tier: 'early', direction: 'strong' };
+        }
+        return { tier: 'none', direction: null };
+    }
+    function confidenceSplit(groups, baselinePct) {
+        const firm = [], early = [], unclear = [];
+        groups.forEach(g => {
+            if (g.attempts === 0) return;
+            const ev = evidenceTier(g.hits, g.attempts, baselinePct);
+            const row = { ...g, direction: ev.direction, tier: ev.tier };
+            if (ev.tier === 'firm') firm.push(row);
+            else if (ev.tier === 'early') early.push(row);
+            else unclear.push(g);
+        });
+        firm.sort((a, b) => a.pct - b.pct);
+        early.sort((a, b) => a.pct - b.pct);
+        unclear.sort((a, b) => b.needMore - a.needMore);
+        // `real` kept as firm+early so callers wanting "anything actionable" stay simple.
+        return { firm, early, unclear, real: [...firm, ...early] };
     }
     function barrelSplit(shots) {
         const hits = shots.filter(s => s.result === 'hit1' || s.result === 'hit2');
@@ -689,6 +938,148 @@
             pctFirst: hits.length ? Math.round(hit1 / hits.length * 100) : 0,
             pctSecond: hits.length ? Math.round(hit2 / hits.length * 100) : 0
         };
+    }
+    /* MISS PATTERNS
+       The app already collects *why* each miss happened, but until now that was only ever
+       shown as a flat tally, which tells you nothing actionable. The coaching value is in
+       crossing miss reason against presentation: "behind on 5 of 6 misses on left-to-right
+       crossers" points at a specific, fixable technical fault in a way that "42% on
+       crossers" never can.
+
+       Two guards against reading noise as insight:
+       - `minMisses` - fewer tagged misses than this and it's flagged low-sample, not a finding.
+       - dominance - if misses are spread evenly across reasons there IS no pattern, so a
+         group is only called dominant when one reason accounts for at least half of them.
+       Both are deliberately conservative: telling someone to rebuild their technique off
+       three misses would be worse than saying nothing. */
+    /* minMisses lowered from 4 to 3 so patterns surface within a round or two. A group of
+       3+ where one cause takes at least half is now reported, but `strength` distinguishes
+       a solid pattern from an early one so the UI can say which it is rather than
+       presenting both with equal authority. */
+    function missPatterns(shots, keyFn, minMisses = 3) {
+        const misses = shots.filter(s => s.result === 'miss' && s.missReason);
+        const groups = {};
+        misses.forEach(s => { const k = keyFn(s) || '(untagged)'; (groups[k] = groups[k] || []).push(s); });
+        return Object.entries(groups).map(([key, arr]) => {
+            const counts = {};
+            arr.forEach(s => { counts[s.missReason] = (counts[s.missReason] || 0) + 1; });
+            const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+            const topReason = sorted[0][0], topCount = sorted[0][1];
+            const share = Math.round(topCount / arr.length * 100);
+            const dominant = arr.length >= minMisses && share >= 50;
+            return {
+                key, total: arr.length, topReason, topCount, share, counts: sorted,
+                lowSample: arr.length < minMisses,
+                dominant,
+                // A pattern off 6+ misses is worth acting on; 3-5 is a lead to watch.
+                strength: !dominant ? 'none' : (arr.length >= 6 ? 'firm' : 'early')
+            };
+        }).sort((a, b) => (b.dominant - a.dominant) || (b.share - a.share) || (b.total - a.total));
+    }
+    /* Plain-English reading of a miss reason. These are standard coaching generalisations,
+       not certainties - worded as "commonly means" and paired with an on-screen caveat,
+       since the same visible miss can have several causes and only a coach watching you
+       can confirm which. Returns '' for any reason not in this list, because miss reasons
+       are user-editable in Settings and inventing advice for a custom label would be
+       worse than staying quiet. */
+    function missReasonAdvice(reason) {
+        const map = {
+            'Behind': 'Commonly means not enough lead, or the gun slowing/stopping as you pull through.',
+            'In front': 'Commonly means over-leading, or rushing the shot ahead of the bird.',
+            'Above': 'Commonly means shooting over the top — often the head lifting off the stock, or missing the drop on a falling clay.',
+            'Below': 'Commonly means the gun is under the line — often not enough gun speed on a riser.',
+            "Didn't mount": 'A setup problem rather than a shooting one — look at hold point, mount consistency and timing.',
+            'Lost sight of it': 'Usually visual pickup — hold point may be wrong for the bird, or eyes going to the barrels instead of the clay.'
+        };
+        return map[reason] || '';
+    }
+    /* PRACTICE PLAN
+       Converts the analysis from description into instruction. Everything above tells the
+       shooter what happened; this tells them what to go and do about it on the next
+       practice session.
+
+       Deliberately built ONLY on findings that survived the confidence check plus miss
+       patterns that were dominant - if it drew on raw percentages it would send Paul off
+       to fix problems that are really just small-sample noise, which is exactly the
+       failure mode the confidence work exists to prevent. That means an empty plan is a
+       legitimate and honest output early on, and it says so rather than inventing filler.
+
+       Suggested target counts are round numbers for a practice session, not a formula. */
+    function buildPracticePlan(shots, shooterId) {
+        const items = [];
+        if (!shots.length) return items;
+        const hits = shots.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
+        const overallPct = Math.round(hits / shots.length * 100);
+
+        const presGroups = pctBy(shots, s => s.presentation);
+        const distGroups = pctBy(shots.filter(s => s.distance && s.distance !== '(not set)'), s => s.distance);
+        const typeGroups = pctBy(shots, s => s.clayType);
+        const split = confidenceSplit([...presGroups, ...distGroups, ...typeGroups], overallPct);
+        const firmWeak = split.firm.filter(g => g.direction === 'weak');
+        const earlyWeak = split.early.filter(g => g.direction === 'weak');
+
+        // 1. Weak areas - firm findings first, then early signals clearly marked as such.
+        firmWeak.slice(0, 3).forEach(g => {
+            items.push({
+                priority: items.length + 1, tier: 'firm',
+                title: g.key,
+                headline: `${g.pct}% against your ${overallPct}% average`,
+                detail: `A real gap, not a small-sample wobble — your range on this sits entirely below your overall rate. Book a stand that throws this and shoot it deliberately rather than hoping it comes up in a round.`,
+                targetShots: 40
+            });
+        });
+        earlyWeak.slice(0, Math.max(0, 3 - firmWeak.length)).forEach(g => {
+            items.push({
+                priority: items.length + 1, tier: 'early',
+                title: g.key,
+                headline: `${g.pct}% vs your ${overallPct}% average — early signal off ${g.attempts} shots`,
+                detail: `Not confirmed yet, but leaning worse than your average. Treat it as a lead: put some deliberate targets into it and the picture will firm up or disappear. Another ~${g.needMore} shots would settle it.`,
+                targetShots: 25
+            });
+        });
+
+        // 2. Dominant miss patterns - the technical "how" to pair with the "what".
+        const patterns = missPatterns(shots, s => s.presentation).filter(p => p.dominant).slice(0, 2);
+        patterns.forEach(p => {
+            const advice = missReasonAdvice(p.topReason);
+            const provisional = p.strength === 'early';
+            items.push({
+                priority: items.length + 1, tier: p.strength,
+                title: `${p.key} — ${p.topReason.toLowerCase()} misses`,
+                headline: `${p.topCount} of ${p.total} tagged misses${provisional ? ' — early signal' : ''}`,
+                detail: (advice ? advice + ' ' : 'Your misses here cluster on one cause, which usually means a single fixable fault. ')
+                    + (provisional
+                        ? 'Only a few misses behind this so far — worth watching on the next outing before you rebuild anything.'
+                        : 'Worth a lesson rather than solo practice — repeating a fault on your own just embeds it.'),
+                targetShots: 25
+            });
+        });
+
+        // 3. Fatigue - only if the drop is substantial and there's enough data behind it.
+        const fatigue = fatigueBuckets(shots);
+        const first = fatigue.find(f => f.key === 'First Third'), last = fatigue.find(f => f.key === 'Last Third');
+        if (first && last && first.attempts >= 12 && last.attempts >= 12 && (first.pct - last.pct) >= 10) {
+            items.push({
+                priority: items.length + 1,
+                title: 'Concentration over a full round',
+                headline: `${first.pct}% early vs ${last.pct}% late`,
+                detail: `You're dropping ${first.pct - last.pct} points by the back end of a round. That's usually routine and stamina rather than technique — look at pre-shot routine, food and water, and practise in longer sessions instead of short bursts.`,
+                targetShots: 0
+            });
+        }
+
+        // 4. Second-barrel reliance.
+        const barrels = barrelSplit(shots);
+        if (barrels.total >= 20 && barrels.pctSecond >= 40) {
+            items.push({
+                priority: items.length + 1,
+                title: 'First-barrel kills',
+                headline: `${barrels.pctSecond}% of your hits come off the second barrel`,
+                detail: `Leaning on the second barrel is fine on hard pairs but costly when it becomes the habit. Practise pairs with a deliberate focus on breaking the first bird early, so the second barrel stays a backup rather than the plan.`,
+                targetShots: 30
+            });
+        }
+        return items;
     }
     function fatigueBuckets(shots) {
         const buckets = { 'First Third': [], 'Middle Third': [], 'Last Third': [] };
@@ -710,6 +1101,75 @@
             const hits = arr.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
             return { date, attempts: arr.length, pct: arr.length ? Math.round(hits / arr.length * 100) : 0 };
         }).sort((a, b) => a.date.localeCompare(b.date));
+    }
+    /* SQUAD COMPARISON
+       Your own hit % can't tell you whether 55% on a stand was poor shooting or a genuinely
+       brutal stand. Comparing against squad-mates on the EXACT SAME targets - same slots,
+       same stand, same round, same weather - controls for difficulty, which no amount of
+       analysing your own numbers in isolation can do.
+
+       Strictly like-for-like: only rounds where at least one other shooter also recorded
+       shots, and only slots where both you and someone else actually took the target. A
+       stand someone skipped isn't a comparison.
+
+       Note this compares you against whoever you happen to shoot with, so it says nothing
+       about the wider field - a squad of better shots will drag the differential negative
+       and vice versa. It answers "was that stand hard, or was it me?", not "how good am I?". */
+    function squadComparison(shooterId) {
+        const rounds = [...db.history, ...(db.activeRound ? [db.activeRound] : [])];
+        let myHits = 0, myAtt = 0, theirHits = 0, theirAtt = 0, roundsCompared = 0;
+        const byPres = {};
+        const standRows = [];
+        rounds.forEach(r => {
+            if (!r.hits || !r.hits[shooterId]) return;
+            const others = Object.keys(r.hits).filter(id => id !== shooterId);
+            if (!others.length) return;
+            let roundCounted = false;
+            r.stands.forEach((st, standPos) => {
+                let sMy = { h: 0, a: 0 }, sTheir = { h: 0, a: 0 };
+                st.slots.forEach(slot => {
+                    const mine = r.hits[shooterId]?.[st.id]?.[slot.id];
+                    if (!mine || mine.result == null) return;
+                    const rivals = others.map(id => r.hits[id]?.[st.id]?.[slot.id]).filter(c => c && c.result != null);
+                    if (!rivals.length) return;   // nobody else shot this exact target
+                    roundCounted = true;
+                    const myHit = (mine.result === 'hit1' || mine.result === 'hit2') ? 1 : 0;
+                    myHits += myHit; myAtt++; sMy.h += myHit; sMy.a++;
+                    rivals.forEach(c => {
+                        const h = (c.result === 'hit1' || c.result === 'hit2') ? 1 : 0;
+                        theirHits += h; theirAtt++; sTheir.h += h; sTheir.a++;
+                    });
+                    const key = slot.presentation || '(untagged)';
+                    const g = byPres[key] || (byPres[key] = { key, myHits: 0, myAtt: 0, theirHits: 0, theirAtt: 0 });
+                    g.myHits += myHit; g.myAtt++;
+                    rivals.forEach(c => { g.theirHits += (c.result === 'hit1' || c.result === 'hit2') ? 1 : 0; g.theirAtt++; });
+                });
+                if (sMy.a && sTheir.a) {
+                    standRows.push({
+                        label: `${r.ground || 'Unnamed'} · Stand ${standPos + 1}`,
+                        date: r.date,
+                        myPct: Math.round(sMy.h / sMy.a * 100),
+                        theirPct: Math.round(sTheir.h / sTheir.a * 100),
+                        myAtt: sMy.a
+                    });
+                }
+            });
+            if (roundCounted) roundsCompared++;
+        });
+        if (!myAtt || !theirAtt) return null;
+        const myPct = Math.round(myHits / myAtt * 100);
+        const theirPct = Math.round(theirHits / theirAtt * 100);
+        const presentations = Object.values(byPres)
+            .filter(g => g.myAtt >= 4 && g.theirAtt >= 4)
+            .map(g => {
+                const mp = Math.round(g.myHits / g.myAtt * 100);
+                const tp = Math.round(g.theirHits / g.theirAtt * 100);
+                return { key: g.key, myPct: mp, theirPct: tp, diff: mp - tp, myAtt: g.myAtt };
+            })
+            .sort((a, b) => a.diff - b.diff);
+        // Stands everyone found hard: squad also scored poorly, so it wasn't just you.
+        const brutalStands = standRows.filter(s => s.theirPct <= 50 && s.myAtt >= 3).sort((a, b) => a.theirPct - b.theirPct).slice(0, 3);
+        return { myPct, theirPct, diff: myPct - theirPct, myAtt, theirAtt, roundsCompared, presentations, brutalStands };
     }
     function bestRound(shooterId) {
         const rounds = db.history.filter(r => r.shooterIds.includes(shooterId));
@@ -1053,6 +1513,45 @@
     /* =========================================================================================
        VIEW: SETUP - INFO
     ========================================================================================= */
+    function renderWeatherPanel(r) {
+        const a = r.conditions.auto;
+        const known = savedGroundCoords(r.ground);
+        const hasGround = !!groundKey(r.ground);
+        return `
+            <div class="border border-slate-200 rounded-xl p-2.5 bg-slate-50">
+                <div class="flex justify-between items-center gap-2">
+                    <span class="text-[9px] font-black uppercase text-slate-400 flex items-center gap-1"><i data-lucide="cloud-sun" size="11"></i> Weather</span>
+                    <div class="flex items-center gap-1.5">
+                        ${a ? `<button onclick="clearRoundWeather()" class="text-[8px] font-black uppercase text-slate-400 px-2 py-1">Clear</button>` : ''}
+                        <button onclick="fetchRoundWeather()" ${weatherState.loading ? 'disabled' : ''} class="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase disabled:opacity-40">
+                            ${weatherState.loading ? 'Fetching…' : (a ? 'Refresh' : 'Get Weather')}
+                        </button>
+                    </div>
+                </div>
+                ${a ? `
+                    <div class="grid grid-cols-4 gap-1.5 mt-2 text-center">
+                        <div><div class="text-sm font-black">${a.windMph != null ? Math.round(a.windMph) : '—'}<span class="text-[8px] text-slate-400 ml-0.5">mph</span></div><div class="text-[7px] font-black uppercase text-slate-400">Wind${a.windCardinal ? ' ' + a.windCardinal : ''}</div></div>
+                        <div><div class="text-sm font-black">${a.tempC != null ? Math.round(a.tempC) + '°' : '—'}</div><div class="text-[7px] font-black uppercase text-slate-400">Temp</div></div>
+                        <div><div class="text-sm font-black">${a.cloudPct != null ? Math.round(a.cloudPct) + '%' : '—'}</div><div class="text-[7px] font-black uppercase text-slate-400">Cloud</div></div>
+                        <div><div class="text-sm font-black">${a.precipMm != null ? a.precipMm : '—'}<span class="text-[8px] text-slate-400 ml-0.5">mm</span></div><div class="text-[7px] font-black uppercase text-slate-400">Rain</div></div>
+                    </div>
+                    <p class="text-[8px] text-slate-400 font-bold mt-1.5">Wind and Light above were set from this — change either if it doesn't match what you're seeing. Fetched ${new Date(a.fetchedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.</p>
+                ` : `
+                    <p class="text-[8px] text-slate-400 font-bold mt-1.5">
+                        ${weatherState.loading ? 'Getting conditions…'
+                          : known ? `Saved location for this ground — tap Get Weather, no GPS needed.`
+                          : hasGround ? `First time at this ground: tap Get Weather and it'll use your location once, then remember it for next time.`
+                          : `Name the ground first, then tap Get Weather.`}
+                    </p>
+                `}
+                ${weatherState.error ? `<p class="text-[8px] font-black uppercase text-red-500 mt-1.5">${weatherState.error} Set Wind and Light by hand instead.</p>` : ''}
+                <div class="mt-2 pt-2 border-t border-slate-200">
+                    <label class="text-[8px] font-black uppercase text-slate-400">Weather notes</label>
+                    <textarea oninput="r_upd_nested('conditions','note',this.value)" placeholder="Gusting off the left on stands 3-5, sun straight into your eyes on 7..." class="w-full h-12 bg-white border border-slate-200 rounded-lg p-2 text-[10px] font-bold outline-none resize-none mt-1">${r.conditions.note || ''}</textarea>
+                    <p class="text-[8px] text-slate-400 font-bold">For what the forecast can't know — gusts, and which way the wind sits relative to the stands.</p>
+                </div>
+            </div>`;
+    }
     function viewSetupInfo() {
         const r = activeRound();
         return `
@@ -1060,7 +1559,7 @@
                 <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">New Round — Details</h3>
                 <div class="grid grid-cols-2 gap-2">
                     <div class="col-span-2 space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Shoot Ground</label>
-                        <input type="text" value="${r.ground}" oninput="r_upd('ground',this.value)" placeholder="Ground name..." class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
+                        <input type="text" value="${r.ground}" oninput="r_upd('ground',this.value)" onchange="maybeAutoFetchWeather()" placeholder="Ground name..." class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
                     <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Date</label>
                         <input type="date" value="${r.date}" onchange="r_upd('date',this.value)" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
                     <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Event</label>
@@ -1089,6 +1588,7 @@
                         })()}
                     </div>
                 </div>
+                ${renderWeatherPanel(r)}
                 <p class="text-[9px] text-slate-400 font-bold mt-1">Choke is set per stand, not here — you'll pick it as you tag each stand.</p>
                 <button onclick="wizardNext('setup-squad')" class="w-full bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest mt-2">Next: Pick Squad →</button>
             </section>`;
@@ -1104,10 +1604,7 @@
         const r = activeRound();
         return `
             <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
-                <div class="flex justify-between items-center mb-2">
-                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Pick Squad</h3>
-                    <button onclick="addProfile()" class="text-[9px] bg-slate-900 text-white px-3 py-1 rounded-lg font-black uppercase">+ New Shooter</button>
-                </div>
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Pick Squad</h3>
                 <div class="space-y-1.5">
                     ${db.profiles.map(p => `
                         <button onclick="toggleSquadMember('${p.id}')" class="w-full flex items-center gap-2 p-2.5 rounded-xl border-2 ${r.shooterIds.includes(p.id) ? 'border-orange-500 bg-orange-50' : 'border-slate-200 bg-white'}">
@@ -1115,8 +1612,13 @@
                             <span class="text-xs font-black uppercase">${p.name}</span>
                             <span class="text-[9px] text-slate-400 font-bold ml-auto">${p.class}</span>
                         </button>
-                    `).join('') || `<p class="text-[10px] text-slate-400 font-bold text-center py-4">No shooter profiles yet — add one above.</p>`}
+                    `).join('') || `<p class="text-[10px] text-slate-400 font-bold text-center py-4">No shooter profiles yet — add your first one below.</p>`}
                 </div>
+                <div class="flex gap-1.5 mt-2 pt-2 border-t border-slate-100">
+                    <input type="text" id="new-squad-shooter" placeholder="New shooter's name..." autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault(); addSquadShooter(this.value); this.value='';}" class="flex-1 bg-slate-50 rounded-lg p-2 text-xs font-bold">
+                    <button onclick="addSquadShooter(document.getElementById('new-squad-shooter').value); document.getElementById('new-squad-shooter').value='';" class="bg-slate-900 text-white px-3 rounded-lg text-[9px] font-black uppercase">+ Add</button>
+                </div>
+                <p class="text-[8px] text-slate-400 font-bold mt-1">New shooters are added to this round's squad automatically. Full details (CPSA number, class, gun cabinet) can be filled in later on the Shooters screen.</p>
                 <div class="flex gap-2 mt-3">
                     <button onclick="wizardNext('setup-info')" class="flex-1 bg-white border border-slate-300 py-3 rounded-xl text-xs font-black uppercase">← Back</button>
                     <button onclick="goToStandSetup()" class="flex-1 bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase">Next: Stands →</button>
@@ -1300,9 +1802,43 @@
                 <div class="p-2 bg-slate-100 border-b border-slate-200 text-[9px] font-black uppercase text-slate-500">Leaderboard</div>
                 <div class="overflow-x-auto">${renderLeaderboardTable(r)}</div>
             </section>
+            ${renderScoringWeather(r)}
             <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
                 <label class="text-[9px] font-black uppercase text-slate-400 mb-1 flex items-center gap-1"><i data-lucide="sticky-note" size="10"></i> Round Notes</label>
                 <textarea oninput="r_upd('notes',this.value)" class="w-full h-16 bg-slate-50 rounded-xl p-3 text-xs font-bold outline-none resize-none">${r.notes}</textarea>
+            </section>`;
+    }
+    /* Mid-round weather. A sporting round can run four hours and the conditions at stand 1
+       often have nothing to do with stand 10, so "Re-check" logs a fresh reading against
+       the stand you're currently on rather than replacing the earlier one. Collapsed into
+       a <details> so it costs almost no vertical space on a phone until it's wanted. */
+    function renderScoringWeather(r) {
+        const a = r.conditions.auto;
+        const readings = Array.isArray(r.conditions.readings) ? r.conditions.readings : [];
+        return `
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <details>
+                    <summary class="text-[9px] font-black uppercase text-slate-400 flex items-center gap-1 cursor-pointer">
+                        <i data-lucide="cloud-sun" size="10"></i> Weather${a ? ` — ${weatherSummary(a)}` : ' — not recorded'}
+                    </summary>
+                    <div class="mt-2 space-y-2">
+                        <div class="flex items-center gap-2">
+                            <button onclick="fetchRoundWeather()" ${weatherState.loading ? 'disabled' : ''} class="glove-nav-btn bg-slate-900 text-white px-3 py-2 rounded-lg text-[9px] font-black uppercase disabled:opacity-40">
+                                ${weatherState.loading ? 'Fetching…' : (a ? 'Re-check Now' : 'Get Weather')}
+                            </button>
+                            <span class="text-[8px] text-slate-400 font-bold">${a ? 'Logs a new reading — earlier ones are kept.' : 'Record conditions for this round.'}</span>
+                        </div>
+                        ${weatherState.error ? `<p class="text-[8px] font-black uppercase text-red-500">${weatherState.error}</p>` : ''}
+                        ${readings.length > 1 ? `<div class="space-y-0.5 bg-slate-50 rounded-lg p-2">
+                            <div class="text-[8px] font-black uppercase text-slate-400">Readings this round</div>
+                            ${readings.map(x => `<div class="text-[8px] font-bold text-slate-500">${new Date(x.fetchedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${x.standIdx ? ' · Stand ' + x.standIdx : ''} — ${weatherSummary(x)}</div>`).join('')}
+                        </div>` : ''}
+                        <div>
+                            <label class="text-[8px] font-black uppercase text-slate-400">Weather notes</label>
+                            <textarea oninput="r_upd_nested('conditions','note',this.value)" placeholder="Wind got up on the back half..." class="w-full h-12 bg-slate-50 rounded-lg p-2 text-[10px] font-bold outline-none resize-none mt-1">${r.conditions.note || ''}</textarea>
+                        </div>
+                    </div>
+                </details>
             </section>`;
     }
     function jumpStand(i) { if (activeRound().isLocked) return; activeRound().activeIdx = i; saveDB(); render(); }
@@ -1355,6 +1891,12 @@
             <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
                 <h3 class="text-sm font-black uppercase">${r.ground || 'Unnamed Ground'}</h3>
                 <p class="text-[9px] text-slate-400 font-bold mb-2">${getUKDate(r.date)} • ${r.event || 'No event name'} • Wind: ${r.conditions.wind || '—'} • Light: ${r.conditions.light || '—'}</p>
+                ${r.conditions.auto ? `<div class="text-[8px] text-slate-400 font-bold mb-2 bg-slate-50 rounded-lg p-1.5">
+                    ${(Array.isArray(r.conditions.readings) && r.conditions.readings.length > 1)
+                        ? `<div class="mb-0.5">Conditions during round:</div>${r.conditions.readings.map(x => `<div>${new Date(x.fetchedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${x.standIdx ? ' · Stand ' + x.standIdx : ''} — ${weatherSummary(x)}</div>`).join('')}`
+                        : `Recorded conditions: ${weatherSummary(r.conditions.auto)}`}
+                </div>` : ''}
+                ${r.conditions.note ? `<p class="text-[9px] font-bold mb-2 bg-orange-50 border border-orange-200 rounded-lg p-2">${r.conditions.note}</p>` : ''}
                 <div class="overflow-x-auto">${renderLeaderboardTable(r)}</div>
                 ${r.notes ? `<p class="text-[10px] font-bold mt-2 bg-slate-50 rounded-lg p-2">${r.notes}</p>` : ''}
             </section>
@@ -1373,11 +1915,43 @@
     /* =========================================================================================
        VIEW: ANALYSIS
     ========================================================================================= */
-    function barRow(label, pct, attempts, lowSample) {
+    /* `ci` is optional so existing callers that pass plain numbers (e.g. the fatigue
+       buckets) keep working unchanged. When present, a wide interval is drawn as a faint
+       band behind the bar - a visual cue that the number is soft without needing the
+       shooter to understand what a confidence interval is. */
+    function barRow(label, pct, attempts, lowSample, ci) {
+        const wide = ci && ci.half > 12;
         return `<div class="space-y-0.5">
-            <div class="flex justify-between text-[9px] font-black uppercase"><span class="truncate max-w-[70%]">${label}${lowSample ? ' <span class=\"text-slate-300\">(low sample)</span>' : ''}</span><span>${pct}% <span class="text-slate-300">(${attempts})</span></span></div>
-            <div class="bar-track"><div class="bar-fill" style="width:${pct}%; ${lowSample ? 'opacity:0.4;' : ''}"></div></div>
+            <div class="flex justify-between text-[9px] font-black uppercase">
+                <span class="truncate max-w-[62%]">${label}${lowSample ? ' <span class=\"text-slate-300\">(low sample)</span>' : ''}</span>
+                <span>${pct}% <span class="text-slate-300">(${attempts})</span></span>
+            </div>
+            <div class="bar-track" style="position:relative;">
+                ${ci ? `<div style="position:absolute; left:${ci.lo}%; width:${Math.max(1, ci.hi - ci.lo)}%; top:0; bottom:0; background:#cbd5e1; opacity:0.55;"></div>` : ''}
+                <div class="bar-fill" style="position:relative; width:${pct}%; ${lowSample ? 'opacity:0.55;' : ''}"></div>
+            </div>
+            ${wide ? `<div class="text-[7px] font-bold text-slate-400 uppercase">Really somewhere between ${ci.lo}% and ${ci.hi}% — too few shots to call</div>` : ''}
         </div>`;
+    }
+    /* One miss-pattern row. A dominant pattern gets the orange treatment and the coaching
+       reading; anything else is shown in muted grey as a plain breakdown, explicitly
+       labelled as no clear pattern or not enough data, so scattered misses can't be
+       mistaken for a finding. */
+    function renderMissPattern(m) {
+        const advice = m.dominant ? missReasonAdvice(m.topReason) : '';
+        const breakdown = m.counts.map(([reason, n]) => `${reason} ${n}`).join(' · ');
+        return `
+            <div class="rounded-lg p-2 ${m.dominant ? 'bg-orange-50 border border-orange-200' : 'bg-slate-50 border border-slate-100'}">
+                <div class="flex justify-between items-baseline gap-2">
+                    <span class="text-[9px] font-black uppercase ${m.dominant ? 'text-orange-600' : 'text-slate-500'} truncate">${m.key}</span>
+                    <span class="text-[8px] font-black uppercase ${m.dominant ? 'text-orange-500' : 'text-slate-400'} flex-shrink-0">${m.total} miss${m.total === 1 ? '' : 'es'}</span>
+                </div>
+                ${m.dominant
+                    ? `<div class="text-[9px] font-black uppercase text-orange-600 mt-0.5">${m.topReason} — ${m.topCount} of ${m.total} (${m.share}%)${m.strength === 'early' ? ' <span class="text-[7px] bg-slate-200 text-slate-600 px-1 py-0.5 rounded">Early</span>' : ''}</div>
+                       ${advice ? `<div class="text-[8px] font-bold text-slate-500 mt-0.5">${advice}${m.strength === 'early' ? ' Only a few misses behind this so far — watch it next time out before acting.' : ''}</div>` : ''}`
+                    : `<div class="text-[8px] font-bold text-slate-400 mt-0.5">${m.lowSample ? 'Not enough tagged misses yet to read anything into' : 'No single dominant cause — misses are spread'}</div>`}
+                <div class="text-[8px] font-bold text-slate-400 mt-1">${breakdown}</div>
+            </div>`;
     }
     function viewAnalysis() {
         if (db.profiles.length === 0) return `<p class="text-center text-xs font-bold text-slate-400 py-8">Add a shooter profile first.</p>`;
@@ -1390,6 +1964,15 @@
         const byPresDistance = pctBy(shots.filter(s => s.distance), s => s.presentation + ' — ' + s.distance);
         const byGround = pctBy(shots, s => s.ground);
         const byChoke = pctBy(shots, s => s.choke);
+        const overallPct = shots.length ? Math.round(shots.filter(s => s.result === 'hit1' || s.result === 'hit2').length / shots.length * 100) : 0;
+        const confidence = confidenceSplit([...byType, ...byPres, ...byDistance], overallPct);
+        const practicePlan = buildPracticePlan(shots, shooterId);
+        const squad = squadComparison(shooterId);
+        const missByPres = missPatterns(shots, s => s.presentation);
+        const missByDist = missPatterns(shots, s => s.distance);
+        const topMissPattern = missByPres.find(m => m.dominant) || null;
+        const byWind = pctBy(shots.filter(s => s.wind && s.wind !== '(not set)'), s => s.wind);
+        const byLight = pctBy(shots.filter(s => s.light && s.light !== '(not set)'), s => s.light);
         const barrels = barrelSplit(shots);
         const best = bestRound(shooterId);
         const missReasons = pctBy(shots.filter(s => s.result === 'miss' && s.missReason), s => s.missReason, 1);
@@ -1451,6 +2034,10 @@
                 <div class="text-[9px] font-black uppercase text-orange-600">Weakest clay type: ${weakestType.key} (${weakestType.pct}%)</div>
                 ${weakestPres ? `<div class="text-[9px] font-black uppercase text-orange-600 mt-1">Weakest presentation: ${weakestPres.key} (${weakestPres.pct}%)</div>` : ''}
                 ${weakestDistance ? `<div class="text-[9px] font-black uppercase text-orange-600 mt-1">Weakest distance: ${weakestDistance.key} (${weakestDistance.pct}%)</div>` : ''}
+                ${topMissPattern ? `<div class="mt-2 pt-2 border-t border-orange-200">
+                    <div class="text-[9px] font-black uppercase text-orange-600">Strongest miss pattern: ${topMissPattern.topReason} on ${topMissPattern.key}</div>
+                    <div class="text-[8px] font-bold text-orange-500 mt-0.5">${topMissPattern.topCount} of ${topMissPattern.total} tagged misses (${topMissPattern.share}%)${missReasonAdvice(topMissPattern.topReason) ? ' — ' + missReasonAdvice(topMissPattern.topReason) : ''}</div>
+                </div>` : ''}
             </section>` : ''}
 
             ${best ? `<section class="bg-green-50 border border-green-200 rounded-xl p-3">
@@ -1462,38 +2049,132 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
                     <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Clay Type</h3>
-                    ${byType.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                    ${byType.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample, t.ci)).join('')}
                 </section>
 
                 <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
                     <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Presentation</h3>
-                    ${byPres.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                    ${byPres.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample, t.ci)).join('')}
                 </section>
 
                 ${byDistance.length ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
                     <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Distance</h3>
-                    ${byDistance.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                    ${byDistance.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample, t.ci)).join('')}
                 </section>` : ''}
 
                 ${byGround.length > 1 ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
                     <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Ground</h3>
-                    ${byGround.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                    ${byGround.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample, t.ci)).join('')}
                 </section>` : ''}
 
                 ${byChoke.length > 1 ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
                     <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Choke</h3>
-                    ${byChoke.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                    ${byChoke.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample, t.ci)).join('')}
+                </section>` : ''}
+
+                ${byWind.length > 1 ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Wind</h3>
+                    ${byWind.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample, t.ci)).join('')}
+                </section>` : ''}
+
+                ${byLight.length > 1 ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Light</h3>
+                    ${byLight.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample, t.ci)).join('')}
                 </section>` : ''}
             </div>
 
             ${byPresDistance.length ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
                 <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Presentation × Distance</h3>
                 <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">e.g. spot far crossers vs close crossers</p>
-                ${byPresDistance.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample)).join('')}
+                ${byPresDistance.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample, t.ci)).join('')}
+            </section>` : ''}
+
+            <section class="bg-slate-900 text-white rounded-xl shadow-sm p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-orange-400">Next Practice Session</h3>
+                ${practicePlan.length ? `
+                    <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">${shots.length} targets logged${practicePlan.some(i => i.tier === 'early') ? ' — items marked EARLY are leads, not conclusions' : ''}</p>
+                    ${practicePlan.map(item => `<div class="bg-slate-800 rounded-lg p-2 ${item.tier === 'early' ? 'border-l-2 border-slate-500' : 'border-l-2 border-orange-500'}">
+                        <div class="flex justify-between items-baseline gap-2">
+                            <span class="text-[10px] font-black uppercase text-white truncate">${item.priority}. ${item.title}</span>
+                            ${item.targetShots ? `<span class="text-[8px] font-black uppercase text-orange-400 flex-shrink-0">${item.targetShots} targets</span>` : ''}
+                        </div>
+                        <div class="flex items-center gap-1.5 mt-0.5">
+                            ${item.tier === 'early' ? `<span class="text-[7px] font-black uppercase bg-slate-600 text-slate-200 px-1 py-0.5 rounded">Early</span>` : `<span class="text-[7px] font-black uppercase bg-orange-500 text-white px-1 py-0.5 rounded">Confirmed</span>`}
+                            <span class="text-[8px] font-black uppercase text-orange-400">${item.headline}</span>
+                        </div>
+                        <div class="text-[8px] font-bold text-slate-300 mt-1 leading-relaxed">${item.detail}</div>
+                    </div>`).join('')}
+                    <p class="text-[8px] text-slate-500 font-bold">Target counts are a sensible session size, not a rule. Work top-down — the first item is where you're losing most.</p>
+                ` : `<p class="text-[9px] text-slate-400 font-bold">Nothing to work from yet off ${shots.length} tagged target${shots.length === 1 ? '' : 's'} — no area is leaning away from your average and no miss pattern has repeated. Roughly 50 targets with miss reasons tagged is usually enough for the first leads to show up.</p>`}
+            </section>
+
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Confidence Check</h3>
+                <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">What the data actually supports, against your ${overallPct}% overall</p>
+                ${confidence.firm.length ? `
+                    <div class="text-[8px] font-black uppercase text-slate-500 pt-1">Confirmed — worth acting on</div>
+                    ${confidence.firm.map(g => `<div class="flex justify-between items-baseline gap-2 rounded-lg p-1.5 ${g.direction === 'weak' ? 'bg-red-50 border border-red-100' : 'bg-green-50 border border-green-100'}">
+                        <span class="text-[9px] font-black uppercase ${g.direction === 'weak' ? 'text-red-600' : 'text-green-700'} truncate">${g.key}</span>
+                        <span class="text-[8px] font-black uppercase ${g.direction === 'weak' ? 'text-red-500' : 'text-green-600'} flex-shrink-0">${g.pct}% · ${g.direction === 'weak' ? 'below' : 'above'} your average (${g.attempts} shots)</span>
+                    </div>`).join('')}
+                ` : ''}
+                ${confidence.early.length ? `
+                    <div class="text-[8px] font-black uppercase text-slate-500 pt-1.5 ${confidence.firm.length ? 'border-t border-slate-100' : ''}">Early signals — leads, not conclusions</div>
+                    ${confidence.early.map(g => `<div class="flex justify-between items-baseline gap-2 rounded-lg p-1.5 bg-slate-50 border border-slate-200">
+                        <span class="text-[9px] font-black uppercase text-slate-600 truncate">${g.key}</span>
+                        <span class="text-[8px] font-black uppercase text-slate-500 flex-shrink-0">${g.pct}% · leaning ${g.direction === 'weak' ? 'low' : 'high'} (${g.attempts} shots, ~${g.needMore} more to confirm)</span>
+                    </div>`).join('')}
+                ` : ''}
+                ${!confidence.firm.length && !confidence.early.length ? `<p class="text-[9px] text-slate-400 font-bold">Nothing is leaning away from your overall average yet off ${shots.length} targets. First signals usually appear around 50.</p>` : ''}
+                ${confidence.unclear.length ? `
+                    <div class="text-[8px] font-black uppercase text-slate-500 pt-1.5 border-t border-slate-100">Not enough data to call</div>
+                    ${confidence.unclear.slice(0, 6).map(g => `<div class="flex justify-between items-baseline gap-2">
+                        <span class="text-[9px] font-bold uppercase text-slate-400 truncate">${g.key} <span class="text-slate-300">${g.pct}%</span></span>
+                        <span class="text-[8px] font-bold text-slate-400 flex-shrink-0">~${g.needMore} more needed</span>
+                    </div>`).join('')}
+                ` : ''}
+                <p class="text-[8px] text-slate-400 font-bold pt-1 border-t border-slate-100">Two bars: <strong>confirmed</strong> means a 95% interval clear of your average — solid enough to act on. <strong>Early signal</strong> uses an 80% interval, so roughly one in five will turn out to be nothing — useful for direction early on, but don't rebuild your technique around one.</p>
+            </section>
+
+            ${squad ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">You vs Your Squad — Same Targets</h3>
+                <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">Only targets you and someone else both shot, so difficulty is matched</p>
+                <div class="grid grid-cols-3 gap-2 text-center py-1">
+                    <div><div class="text-xl font-black">${squad.myPct}%</div><div class="text-[7px] font-black uppercase text-slate-400">You (${squad.myAtt})</div></div>
+                    <div><div class="text-xl font-black text-slate-400">${squad.theirPct}%</div><div class="text-[7px] font-black uppercase text-slate-400">Squad (${squad.theirAtt})</div></div>
+                    <div><div class="text-xl font-black ${squad.diff >= 0 ? 'text-green-600' : 'text-red-500'}">${squad.diff >= 0 ? '+' : ''}${squad.diff}</div><div class="text-[7px] font-black uppercase text-slate-400">Difference</div></div>
+                </div>
+                ${squad.presentations.length ? `
+                    <div class="text-[8px] font-black uppercase text-slate-500 pt-1 border-t border-slate-100">Against the squad, by presentation</div>
+                    ${squad.presentations.map(p => `<div class="flex justify-between items-baseline gap-2">
+                        <span class="text-[9px] font-black uppercase truncate ${p.diff < 0 ? 'text-red-600' : 'text-slate-600'}">${p.key}</span>
+                        <span class="text-[8px] font-black uppercase flex-shrink-0 ${p.diff < 0 ? 'text-red-500' : 'text-green-600'}">${p.myPct}% vs ${p.theirPct}% · ${p.diff >= 0 ? '+' : ''}${p.diff}</span>
+                    </div>`).join('')}
+                ` : ''}
+                ${squad.brutalStands.length ? `
+                    <div class="text-[8px] font-black uppercase text-slate-500 pt-1.5 border-t border-slate-100">Stands that beat everyone — not just you</div>
+                    ${squad.brutalStands.map(s => `<div class="flex justify-between items-baseline gap-2">
+                        <span class="text-[9px] font-bold uppercase text-slate-500 truncate">${s.label}</span>
+                        <span class="text-[8px] font-bold text-slate-400 flex-shrink-0">you ${s.myPct}% · squad ${s.theirPct}%</span>
+                    </div>`).join('')}
+                ` : ''}
+                <p class="text-[8px] text-slate-400 font-bold pt-1 border-t border-slate-100">Compares you to whoever you shoot with, across ${squad.roundsCompared} round${squad.roundsCompared === 1 ? '' : 's'} — so it answers "was that stand hard, or was it me?", not how you'd place in a competition.</p>
+            </section>` : ''}
+
+            ${missByPres.length ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Miss Patterns by Presentation</h3>
+                <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">Where your misses cluster on one cause — the fixable stuff</p>
+                ${missByPres.map(m => renderMissPattern(m)).join('')}
+                <p class="text-[8px] text-slate-400 font-bold pt-1 border-t border-slate-100">Readings are general coaching guidance, not a diagnosis — the same visible miss can have more than one cause, so treat these as what to check with a coach rather than settled fact.</p>
+            </section>` : ''}
+
+            ${missByDist.some(m => m.dominant) ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Miss Patterns by Distance</h3>
+                ${missByDist.filter(m => m.dominant).map(m => renderMissPattern(m)).join('')}
             </section>` : ''}
 
             ${missReasons.length ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
-                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Miss Reasons (tagged misses only)</h3>
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Miss Reasons — All Rounds</h3>
                 ${missReasons.map(t => `<div class="flex justify-between text-[9px] font-black uppercase"><span>${t.key}</span><span>${t.attempts}</span></div>`).join('')}
             </section>` : ''}
 
