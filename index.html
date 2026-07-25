@@ -1299,7 +1299,11 @@
             case 'settings': container.innerHTML = viewSettings(); break;
             default: container.innerHTML = viewHome();
         }
-        lucide.createIcons();
+        // Guarded: if the Lucide CDN hasn't loaded (offline before first cache, blocked
+        // network, slow start) a bare lucide.createIcons() throws a ReferenceError at the
+        // end of every render. Icons are decoration - losing them must never take the app
+        // down with them.
+        try { if (typeof lucide !== 'undefined') lucide.createIcons(); } catch (e) {}
         if (db.view === 'analysis') renderTrendChart();
     }
     // Trend chart lives on a <canvas> that gets wiped and recreated every render()
