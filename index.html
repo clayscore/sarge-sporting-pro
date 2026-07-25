@@ -184,7 +184,7 @@
         };
     }
     function defaultDB() {
-        return { profiles: [], presets: defaultPresets(), history: [], activeRound: null, view: 'home', analysisShooterId: null, historyRoundId: null, avgWindow: 6, gloveMode: false, groundLocations: {} };
+        return { profiles: [], presets: defaultPresets(), history: [], activeRound: null, view: 'home', analysisShooterId: null, historyRoundId: null, avgWindow: 6, gloveMode: false, groundLocations: {}, autoBackup: true, lastAutoBackupAt: null };
     }
     let db = defaultDB();
     // Glove mode scales up buttons/cards/dropdowns on the scoring screen for
@@ -720,7 +720,9 @@
         db.activeRound = null;
         db.historyRoundId = r.id;
         db.view = 'round-detail';
-        saveDB(); render();
+        saveDB();
+        if (db.autoBackup !== false) autoBackupAfterRound();
+        render();
     }
 
     /* =========================================================================================
@@ -1195,11 +1197,54 @@
     /* =========================================================================================
        BACKUP / RESTORE
     ========================================================================================= */
-    function exportBackup() {
+    function backupFilename(prefix) {
+        return `${prefix}-${new Date().toISOString().split('T')[0]}.json`;
+    }
+    function writeBackupFile(filename) {
         const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = `sarge-backup-${new Date().toISOString().split('T')[0]}.json`; a.click();
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        // Give the download a moment to start before releasing the blob.
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
     }
+    function exportBackup() { writeBackupFile(backupFilename('sarge-backup')); }
+    /* AUTOMATIC BACKUP - runs on finishing a round, at most ONCE PER DAY.
+       All the app's data lives in browser storage for this origin, so anything that clears
+       site data destroys it. A file in Downloads sits outside browser storage entirely, so
+       it survives that (and survives reinstalling the app). That's the whole point: it
+       turns "Paul remembered to press Export" from the only safeguard into a backstop.
+
+       WHY ONCE A DAY RATHER THAN OVERWRITING A SINGLE FILE: a web app cannot overwrite a
+       file in Downloads. Reusing one filename doesn't replace anything - Android saves
+       "sarge-auto (1).json", "(2)" and so on, which is worse, because you can no longer
+       tell which is newest. The File System Access API would allow genuine overwriting via
+       a retained file handle, but Chrome on Android doesn't support showSaveFilePicker
+       (planned for a future Android release, not available now). So the practical fix is
+       fewer files: one per shooting day, dated, newest obvious by name.
+
+       The trade-off, stated plainly because it matters: if two rounds are shot in one day,
+       only the first triggers a backup, so that file won't contain the second round until
+       the next day's backup catches up. The data is still safe in the app; it's only the
+       off-device copy that lags. Manual Export is there for an immediate up-to-date copy.
+
+       Failure must be silent and harmless - a blocked download must never interrupt
+       finishing a round. */
+    function alreadyBackedUpToday() {
+        if (!db.lastAutoBackupAt) return false;
+        const last = new Date(db.lastAutoBackupAt).toISOString().split('T')[0];
+        return last === new Date().toISOString().split('T')[0];
+    }
+    function autoBackupAfterRound() {
+        try {
+            if (alreadyBackedUpToday()) return;
+            writeBackupFile(backupFilename('sarge-auto'));
+            db.lastAutoBackupAt = Date.now();
+            saveDB();
+        } catch (e) {}
+    }
+    function toggleAutoBackup() { db.autoBackup = (db.autoBackup === false); saveDB(); render(); }
     function triggerImport() { document.getElementById('import-file-input').click(); }
     function handleImportFile(file) {
         if (!file) return;
@@ -1305,6 +1350,7 @@
         // down with them.
         try { if (typeof lucide !== 'undefined') lucide.createIcons(); } catch (e) {}
         if (db.view === 'analysis') renderTrendChart();
+        if (db.view === 'settings') showStorageStatus();
     }
     // Trend chart lives on a <canvas> that gets wiped and recreated every render()
     // (innerHTML replacement above destroys the old canvas element), so the Chart.js
@@ -2262,7 +2308,17 @@
             </section>
             <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
                 <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Backup &amp; Restore</h3>
-                <p class="text-[9px] text-slate-400 font-bold mb-2">All your data lives in this browser only. Export a backup regularly so a cleared cache or new device doesn't lose your history.</p>
+                <p class="text-[9px] text-slate-400 font-bold mb-2">All your data is stored on this device only — nothing is uploaded anywhere. The app asks Android to keep it safe from being cleared automatically when storage runs low, <strong>but nothing can protect it if you clear this site's data in Chrome</strong> ("Clear browsing data" with cookies/site data ticked, or Clear &amp; reset). Clearing browsing <em>history</em> alone is harmless. Export a backup after any round you'd hate to lose, and keep it off the phone.</p>
+                <p id="storage-status" class="text-[8px] font-bold mb-2"></p>
+                <div class="flex justify-between items-center py-2 border-y border-slate-100 mb-2">
+                    <div class="pr-3">
+                        <div class="text-[10px] font-black uppercase">Auto-backup each round</div>
+                        <p class="text-[8px] text-slate-400 font-bold mt-0.5">Saves one dated backup to Downloads per shooting day. Downloads aren't touched by clearing site data, so this is your safety net. Browsers can't overwrite a file, so it writes one per day rather than one per round — shoot twice in a day and the second round is picked up by the next day's backup, or press Export Backup for an immediate copy.${db.lastAutoBackupAt ? ` <span class="text-slate-500">Last saved ${getUKDate(new Date(db.lastAutoBackupAt).toISOString().split('T')[0])}.</span>` : ''}</p>
+                    </div>
+                    <button onclick="toggleAutoBackup()" class="${db.autoBackup !== false ? 'bg-orange-500' : 'bg-slate-200'} w-12 h-7 rounded-full relative flex-shrink-0">
+                        <span class="absolute top-0.5 ${db.autoBackup !== false ? 'left-6' : 'left-0.5'} w-6 h-6 bg-white rounded-full shadow"></span>
+                    </button>
+                </div>
                 <div class="flex gap-2">
                     <button onclick="exportBackup()" class="flex-1 bg-slate-900 text-white py-2.5 rounded-xl text-[10px] font-black uppercase">Export Backup</button>
                     <button onclick="triggerImport()" class="flex-1 bg-white border border-slate-300 py-2.5 rounded-xl text-[10px] font-black uppercase">Restore Backup</button>
@@ -2280,7 +2336,42 @@
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW Registration failed', err)); });
     }
-    window.onload = () => { loadDB(); render(); };
+    /* Ask the browser to mark this site's storage as PERSISTENT.
+       Everything - profiles, every round, all history - lives in localStorage for this
+       origin. By default that's "best effort" storage, which the browser is free to evict
+       when the device runs low on space. Persistent storage takes it out of that automatic
+       eviction pool, so a career's worth of shooting data can't quietly disappear because
+       the phone filled up.
+
+       Be clear about what this does NOT do: it cannot stop the user deliberately clearing
+       site data (Chrome's "Clear browsing data" with cookies/site data ticked, or "Clear &
+       reset" on the site). Nothing in a web app can. Exported backups remain the only real
+       protection against that, which is why the warning in Settings still matters.
+
+       Chrome typically grants this silently for an installed/frequently-used app. Wrapped
+       defensively - unsupported browsers or a rejection must not break startup. */
+    /* Reports whether persistence was actually granted, rather than assuming it was -
+       Chrome can decline, and silently believing your data is protected when it isn't
+       would be worse than not asking at all. Async, so it fills the line in after render. */
+    async function showStorageStatus() {
+        const el = document.getElementById('storage-status');
+        if (!el) return;
+        try {
+            if (!navigator.storage || !navigator.storage.persisted) { el.innerHTML = ''; return; }
+            const granted = await navigator.storage.persisted();
+            el.innerHTML = granted
+                ? `<span class="text-green-600">✓ Protected from automatic clearing by Android.</span>`
+                : `<span class="text-orange-500">⚠ Android hasn't granted protected storage — your data could be cleared if the phone runs very low on space. Back up more often.</span>`;
+        } catch (e) { el.innerHTML = ''; }
+    }
+    async function requestPersistentStorage() {
+        try {
+            if (!navigator.storage || !navigator.storage.persist) return;
+            if (navigator.storage.persisted && await navigator.storage.persisted()) return; // already granted
+            await navigator.storage.persist();
+        } catch (e) {}
+    }
+    window.onload = () => { loadDB(); render(); requestPersistentStorage(); };
     </script>
 </body>
 </html>
