@@ -76,11 +76,12 @@
            markup carries these hooks - no ternary classes scattered through
            every template string, just these overrides plus the class hooks. */
         body.glove-mode .glove-standnav { width: 64px !important; height: 64px !important; font-size: 16px !important; }
-        body.glove-mode .glove-target-card { padding: 14px !important; min-width: 150px !important; }
-        body.glove-mode .glove-target-label { font-size: 11px !important; line-height: 1.5 !important; }
-        body.glove-mode .glove-hitmiss-btn { height: 60px !important; font-size: 16px !important; }
-        body.glove-mode .glove-missreason-chip { font-size: 13px !important; padding: 8px 14px !important; }
-        body.glove-mode .glove-choke-select { font-size: 14px !important; padding: 10px !important; }
+        body.glove-mode .glove-target-card { padding: 14px !important; min-width: 160px !important; }
+        body.glove-mode .glove-target-label { font-size: 14px !important; line-height: 1.5 !important; }
+        body.glove-mode .glove-hitmiss-btn { height: 68px !important; font-size: 18px !important; }
+        body.glove-mode .glove-missreason-chip { font-size: 13px !important; padding: 12px 6px !important; }
+        body.glove-mode .glove-choke-select { font-size: 13px !important; padding: 8px !important; max-width: 110px !important; }
+        body.glove-mode .glove-legend-item { font-size: 11px !important; }
         body.glove-mode .glove-shooter-name { font-size: 16px !important; max-width: 160px !important; }
         body.glove-mode .glove-count { font-size: 24px !important; }
         body.glove-mode .glove-nav-btn { padding: 20px !important; font-size: 15px !important; }
@@ -213,7 +214,8 @@
             id: newId(), createdAt: Date.now(), finishedAt: null, setupComplete: false, wizardStep: 'info',
             ground: '', date: new Date().toISOString().split('T')[0], event: '', notes: '', discipline: 'ESP',
             conditions: { wind: '', light: '' }, equipment: { gunId: '', gunName: '', cartridge: '' },
-            shooterIds: [], stands: [], hits: {}, chokes: {}, activeIdx: 0, isLocked: false, editingTagsForStandId: null
+            shooterIds: [], stands: [], hits: {}, chokes: {}, activeIdx: 0, isLocked: false, editingTagsForStandId: null,
+            expandedMissKey: null
         };
     }
     function activeRound() { return db.activeRound; }
@@ -487,7 +489,22 @@
         const cell = byStand[slotId] || (byStand[slotId] = { result: null, missReason: null });
         cell.result = (cell.result === 'miss') ? null : 'miss';
         if (cell.result !== 'miss') cell.missReason = null;
+        // A fresh miss shows the reason list open; un-marking closes it.
+        r.expandedMissKey = null;
         if (cell.result !== null && navigator.vibrate) navigator.vibrate([40, 40, 40]);
+        saveDB(); render();
+    }
+    /* The miss-reason list is tall (one row per reason) and previously stayed open
+       forever once a miss was tagged, eating the screen on a phone. It now collapses
+       to a single chip showing the chosen reason as soon as one is picked; tapping
+       that chip reopens the list to change it. `expandedMissKey` is keyed by
+       shooter+slot because the same slot is scored separately by each squad member. */
+    function missKey(shooterId, slotId) { return shooterId + '::' + slotId; }
+    function toggleMissReasonList(shooterId, slotId) {
+        const r = activeRound();
+        if (r.isLocked) return;
+        const key = missKey(shooterId, slotId);
+        r.expandedMissKey = (r.expandedMissKey === key) ? null : key;
         saveDB(); render();
     }
     function setMissReason(shooterId, standId, slotId, reason) {
@@ -495,6 +512,9 @@
         const cell = r.hits[shooterId]?.[standId]?.[slotId];
         if (!cell || cell.result !== 'miss') return;
         cell.missReason = (cell.missReason === reason) ? null : reason;
+        // Collapse the list once a reason is chosen; if they cleared it by
+        // re-tapping the same reason, leave it open so they can pick another.
+        r.expandedMissKey = cell.missReason ? null : missKey(shooterId, slotId);
         saveDB(); render();
     }
     function undo() { if (undoSnapshot) { activeRound().hits = JSON.parse(undoSnapshot); undoSnapshot = null; saveDB(); render(); } }
@@ -1160,6 +1180,26 @@
     /* =========================================================================================
        VIEW: SCORING
     ========================================================================================= */
+    /* The stand's target descriptions (clay type / presentation / distance) are identical
+       for every shooter on that stand, so repeating them on every single target card for
+       every shooter wasted most of the card's width on phone screens - the buttons ended up
+       tiny. Instead each distinct bird definition gets a letter (A, B, C...) shown once in a
+       legend in the stand header, and the cards just carry the letter. Repeated pairs reuse
+       the same letter, since they're the same bird thrown again. */
+    function standTargetLegend(st) {
+        const letters = {};
+        const defs = [];
+        st.slots.forEach(s => {
+            const key = (s.defId || s.pairId) + '::' + s.birdIndex;
+            if (!(key in letters)) {
+                letters[key] = String.fromCharCode(65 + defs.length);
+                defs.push({ letter: letters[key], clayType: s.clayType, presentation: s.presentation, distance: s.distance });
+            }
+        });
+        const bySlot = {};
+        st.slots.forEach(s => { bySlot[s.id] = letters[(s.defId || s.pairId) + '::' + s.birdIndex]; });
+        return { defs, bySlot };
+    }
     function viewScoring() {
         const r = activeRound();
         const st = r.stands[r.activeIdx];
@@ -1174,6 +1214,7 @@
         let standNav = r.stands.map((s, i) => `<button onclick="jumpStand(${i})" class="glove-standnav flex-shrink-0 w-11 h-11 rounded-xl font-black text-xs border-2 ${r.activeIdx === i ? 'bg-orange-500 border-orange-500 text-white shadow-lg' : s.slots.length === 0 ? 'bg-white border-dashed border-slate-300 text-slate-300' : 'bg-white border-slate-200 text-slate-500'}">${i + 1}</button>`).join('');
         standNav += `<button onclick="addStand()" class="glove-standnav flex-shrink-0 w-11 h-11 rounded-xl font-black text-xs border-2 border-dashed border-slate-300 text-slate-400">+</button>`;
 
+        const legend = standTargetLegend(st);
         let rows = '';
         if (st.slots.length > 0) {
             for (let i = 0; i < n; i++) {
@@ -1185,13 +1226,17 @@
                 st.slots.forEach((slot, si) => {
                     const cell = byStand[slot.id] || { result: null, missReason: null };
                     targetsHtml += `
-                        <div class="glove-target-card border border-slate-200 rounded-lg p-1.5 bg-slate-50 min-w-[86px]">
-                            <div class="glove-target-label text-[7px] font-black uppercase text-slate-400 truncate mb-1">${slot.clayType}<br>${slot.presentation}<br>${slot.distance || ''}</div>
+                        <div class="glove-target-card border border-slate-200 rounded-lg p-1.5 bg-slate-50 min-w-[104px] flex-1">
+                            <div class="glove-target-label text-[10px] font-black uppercase text-slate-500 mb-1 text-center">${legend.bySlot[slot.id]}<span class="text-slate-300 ml-1">#${si + 1}</span></div>
                             <div class="flex gap-1">
-                                <button onclick="setHit('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 h-8 rounded-md font-black text-[9px] border ${(cell.result === 'hit1' || cell.result === 'hit2') ? 'hit-bg' : 'bg-white border-slate-300 text-slate-400'}">Hit</button>
-                                <button onclick="setMiss('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 h-8 rounded-md font-black text-[9px] border ${cell.result === 'miss' ? 'miss-bg' : 'bg-white border-slate-300 text-slate-400'}">Miss</button>
+                                <button onclick="setHit('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 h-12 rounded-md font-black text-[12px] border ${(cell.result === 'hit1' || cell.result === 'hit2') ? 'hit-bg' : 'bg-white border-slate-300 text-slate-400'}">Hit</button>
+                                <button onclick="setMiss('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 h-12 rounded-md font-black text-[12px] border ${cell.result === 'miss' ? 'miss-bg' : 'bg-white border-slate-300 text-slate-400'}">Miss</button>
                             </div>
-                            ${cell.result === 'miss' ? `<div class="flex flex-wrap gap-1 mt-1">${db.presets.missReasons.map(mr => `<span onclick="setMissReason('${shId}','${st.id}','${slot.id}','${mr}')" class="glove-missreason-chip chip ${cell.missReason === mr ? 'miss-active' : ''}" style="font-size:6px; padding:2px 5px;">${mr}</span>`).join('')}</div>` : ''}
+                            ${cell.result === 'miss' ? (
+                                (cell.missReason && r.expandedMissKey !== missKey(shId, slot.id))
+                                ? `<div class="mt-1.5"><span onclick="toggleMissReasonList('${shId}','${slot.id}')" class="glove-missreason-chip chip miss-active" style="display:block; text-align:center; font-size:9px; padding:7px 4px;">${cell.missReason} <span style="opacity:0.7;">✕</span></span></div>`
+                                : `<div class="flex flex-col gap-1 mt-1.5">${db.presets.missReasons.map(mr => `<span onclick="setMissReason('${shId}','${st.id}','${slot.id}','${mr}')" class="glove-missreason-chip chip ${cell.missReason === mr ? 'miss-active' : ''}" style="display:block; text-align:center; font-size:9px; padding:7px 4px;">${mr}</span>`).join('')}</div>`
+                            ) : ''}
                         </div>`;
                 });
                 const shooterChoke = getShooterChoke(r, shId, st.id);
@@ -1200,8 +1245,8 @@
                         <div class="flex justify-between items-center px-1">
                             <div class="flex items-center gap-1.5"><span class="glove-shooter-name text-[11px] font-black uppercase truncate max-w-[110px] tracking-tight">${p.name}</span>${i === 0 ? '<span class="bg-orange-500 text-white text-[6px] px-1 rounded-full font-black uppercase">First Up</span>' : ''}</div>
                             <div class="flex items-center gap-2">
-                                <select onchange="setShooterChoke('${shId}','${st.id}', this.value)" class="glove-choke-select text-[8px] font-bold bg-slate-50 border border-slate-200 rounded-md px-1 py-0.5">
-                                    <option value="">Choke —</option>
+                                <select onchange="setShooterChoke('${shId}','${st.id}', this.value)" title="Choke" class="glove-choke-select text-[8px] font-bold bg-slate-50 border border-slate-200 rounded-md px-1 py-0.5 max-w-[74px] truncate">
+                                    <option value="">Chk —</option>
                                     ${db.presets.chokes.map(c => `<option ${shooterChoke === c ? 'selected' : ''}>${c}</option>`).join('')}
                                 </select>
                                 <div class="glove-count text-base font-black italic text-slate-900">${count}<span class="text-slate-300 text-[8px] not-italic ml-0.5">/${st.slots.length}</span></div>
@@ -1214,12 +1259,17 @@
         return `
             <div id="stand-nav" class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide px-1">${standNav}</div>
             <section class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
-                <div class="bg-slate-900 px-3 py-2.5 text-white flex justify-between items-center">
-                    <h2 class="glove-stand-title text-lg font-black italic uppercase">Stand ${r.activeIdx + 1}</h2>
-                    <div class="flex items-center gap-2">
-                        <span class="text-[9px] text-orange-400 font-bold uppercase">${st.slots.length} Targets</span>
-                        ${st.slots.length > 0 ? `<button onclick="toggleStandTagEdit('${st.id}')" class="glove-edit-btn text-[8px] bg-slate-800 text-white px-2 py-1 rounded-lg font-black uppercase">${isTagging ? 'Done' : 'Edit'}</button>` : ''}
+                <div class="bg-slate-900 px-3 py-2.5 text-white">
+                    <div class="flex justify-between items-center">
+                        <h2 class="glove-stand-title text-lg font-black italic uppercase">Stand ${r.activeIdx + 1}</h2>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[9px] text-orange-400 font-bold uppercase">${st.slots.length} Targets</span>
+                            ${st.slots.length > 0 ? `<button onclick="toggleStandTagEdit('${st.id}')" class="glove-edit-btn text-[8px] bg-slate-800 text-white px-2 py-1 rounded-lg font-black uppercase">${isTagging ? 'Done' : 'Edit'}</button>` : ''}
+                        </div>
                     </div>
+                    ${legend.defs.length ? `<div class="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 pt-1.5 border-t border-slate-700">
+                        ${legend.defs.map(d => `<div class="glove-legend-item text-[8px] font-bold uppercase text-slate-300 leading-tight"><span class="text-orange-400 font-black">${d.letter}</span> ${d.clayType} · ${d.presentation}${d.distance ? ' · ' + d.distance : ''}</div>`).join('')}
+                    </div>` : ''}
                 </div>
                 <div class="p-2.5">${isTagging ? renderStandTagPanel(st, r.activeIdx) : ''}</div>
                 ${st.slots.length === 0 ? `<p class="text-center text-[10px] font-bold text-slate-400 pb-4">Tag this stand's targets above to start scoring it.</p>` : `<div class="divide-y divide-slate-100">${rows}</div>`}
