@@ -1326,7 +1326,33 @@
     /* =========================================================================================
        RENDER — ROUTER
     ========================================================================================= */
+    /* HORIZONTAL SCROLL PRESERVATION
+       Every tap (a hit, a miss, a choke change) calls render(), which replaces
+       app-container's innerHTML wholesale. That destroys the horizontally-scrolled target
+       strips and rebuilds them fresh at scrollLeft 0 - so on a stand with several pairs,
+       marking a target threw the view back to the far left and you had to scroll across
+       again for every single shot. Genuinely maddening on a stand of 8+ targets.
+
+       Fix: snapshot the scroll offset of every element tagged `data-hscroll` before the
+       re-render and put it back afterwards, keyed so each shooter's strip restores its own
+       position independently. Re-applied once in requestAnimationFrame too, because
+       assigning scrollLeft before layout has settled can silently clamp to 0.
+
+       (The proper fix is to stop re-rendering the whole screen for a single tap, but that's
+       a large refactor of the render model; this solves the actual problem safely.) */
+    function captureHScroll() {
+        const map = {};
+        document.querySelectorAll('[data-hscroll]').forEach(el => { map[el.getAttribute('data-hscroll')] = el.scrollLeft; });
+        return map;
+    }
+    function restoreHScroll(map) {
+        document.querySelectorAll('[data-hscroll]').forEach(el => {
+            const saved = map[el.getAttribute('data-hscroll')];
+            if (saved) el.scrollLeft = saved;
+        });
+    }
     function render() {
+        const hscroll = captureHScroll();
         document.body.classList.toggle('glove-mode', !!db.gloveMode);
         renderHeaderActions();
         renderNav();
@@ -1349,6 +1375,8 @@
         // end of every render. Icons are decoration - losing them must never take the app
         // down with them.
         try { if (typeof lucide !== 'undefined') lucide.createIcons(); } catch (e) {}
+        restoreHScroll(hscroll);
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => restoreHScroll(hscroll));
         if (db.view === 'analysis') renderTrendChart();
         if (db.view === 'settings') showStorageStatus();
     }
@@ -1822,12 +1850,12 @@
                                 <div class="glove-count text-base font-black italic text-slate-900">${count}<span class="text-slate-300 text-[8px] not-italic ml-0.5">/${st.slots.length}</span></div>
                             </div>
                         </div>
-                        <div class="flex gap-1.5 w-full overflow-x-auto pb-1 scrollbar-hide">${targetsHtml}</div>
+                        <div data-hscroll="targets-${shId}" class="flex gap-1.5 w-full overflow-x-auto pb-1 scrollbar-hide">${targetsHtml}</div>
                     </div>`;
             }
         }
         return `
-            <div id="stand-nav" class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide px-1">${standNav}</div>
+            <div id="stand-nav" data-hscroll="standnav" class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide px-1">${standNav}</div>
             <section class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
                 <div class="bg-slate-900 px-3 py-2.5 text-white">
                     <div class="flex justify-between items-center">
