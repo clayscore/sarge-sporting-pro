@@ -1,4 +1,4 @@
-const CACHE_NAME = 'clayscore-v34';
+const CACHE_NAME = 'clayscore-v36';
 const ICON_URL = 'https://img.icons8.com/ios-filled/512/target.png';
 const ASSETS = [
   './',

@@ -84,6 +84,21 @@
         .navbtn { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 8px; font-weight: 900; text-transform: uppercase; color: #94a3b8; padding: 6px 4px; border-radius: 10px; flex: 1; }
         .navbtn.active { color: #f97316; background: #1e293b; }
         .hidden-view { display: none !important; }
+        /* Trophy celebration overlay */
+        #trophy-backdrop { position: fixed; inset: 0; background: rgba(6, 10, 18, 0.86); z-index: 110; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        #trophy-backdrop.hidden { display: none !important; }
+        #trophy-box { background: #0f172a; border: 1px solid #24334c; border-radius: 18px; padding: 18px; width: 100%; max-width: 340px; max-height: 80vh; overflow-y: auto; box-shadow: 0 24px 60px rgba(0,0,0,0.6); }
+        #trophy-heading { font-size: 16px; font-weight: 900; text-transform: uppercase; font-style: italic; color: #fbbf24; text-align: center; letter-spacing: -0.02em; }
+        #trophy-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+        #trophy-close { width: 100%; margin-top: 14px; padding: 13px; border-radius: 12px; background: #f97316; color: #fff; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+        body.glove-mode #trophy-close { padding: 18px; font-size: 15px; }
+        /* Analysis hero card - a subtle gradient so the headline panel reads as the top of the
+           page rather than just another white box. Kept very restrained: this screen is data,
+           and heavy decoration would fight legibility in bright sun. */
+        .hero-card { background: linear-gradient(135deg, #ffffff 0%, #f8fafc 55%, #fff7ed 100%); }
+        body.dark .hero-card { background: linear-gradient(135deg, #111a2b 0%, #0f1726 55%, #1a1408 100%); }
+        body.dark .gauge-track { stroke: #24334c; }
+        body.glove-mode .hero-card svg { width: 156px; height: 156px; }
         /* Confirm/notice dialog */
         #modal-backdrop { position: fixed; inset: 0; background: rgba(8, 12, 20, 0.72); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
         #modal-backdrop.hidden { display: none !important; }
@@ -250,6 +265,14 @@
             </div>
         </div>
     </div>
+    <!-- Trophy celebration, shown once immediately after a round that unlocked something. -->
+    <div id="trophy-backdrop" class="hidden no-print" onclick="closeTrophyPopup()">
+        <div id="trophy-box" onclick="event.stopPropagation()">
+            <div id="trophy-heading"></div>
+            <div id="trophy-list"></div>
+            <button onclick="closeTrophyPopup()" id="trophy-close">Nice</button>
+        </div>
+    </div>
     <input type="file" id="import-file-input" accept="application/json" class="hidden" onchange="handleImportFile(this.files[0])">
 
     <script>
@@ -369,7 +392,7 @@
         };
     }
     function defaultDB() {
-        return { profiles: [], presets: defaultPresets(), history: [], activeRound: null, view: 'home', analysisShooterId: null, historyRoundId: null, avgWindow: 6, gloveMode: false, darkMode: false, groundLocations: {}, autoBackup: true, lastAutoBackupAt: null, randomiseSquadOrder: true, grounds: [] };
+        return { profiles: [], presets: defaultPresets(), history: [], activeRound: null, view: 'home', analysisShooterId: null, historyRoundId: null, avgWindow: 6, gloveMode: false, darkMode: false, groundLocations: {}, autoBackup: true, lastAutoBackupAt: null, randomiseSquadOrder: true, grounds: [], seenAchievements: {} };
     }
     let db = defaultDB();
     // Glove mode scales up buttons/cards/dropdowns on the scoring screen for
@@ -982,6 +1005,14 @@
             saveDB();
             if (db.autoBackup !== false) autoBackupAfterRound();
             render();
+            /* Celebrate anything this round unlocked. Only for the main user - trophies are a
+               personal record, and popping up medals for a guest you're merely scoring for
+               would be noise. Falls back to nothing if no main user is set. */
+            const mu = getMainUser();
+            if (mu && r.shooterIds.includes(mu.id)) {
+                const fresh = newAchievementsFor(mu.id);
+                if (fresh.length) { markAchievementsSeen(mu.id, fresh); showTrophyPopup(fresh); }
+            }
         });
     }
 
@@ -1878,14 +1909,25 @@
                     <button onclick="startNewRound()" class="w-full bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest">+ New Round</button>
                 `}
             </section>
-            ${getMainUser() ? `
-            <button onclick="goToMyStats()" class="w-full bg-slate-900 rounded-xl shadow-sm p-3 text-left flex items-center gap-2">
-                <i data-lucide="star" class="w-5 h-5 text-orange-400"></i>
-                <div>
-                    <div class="text-[11px] font-black uppercase text-white">My Stats</div>
-                    <div class="text-[9px] text-slate-400 font-bold">${getMainUser().name}'s full analysis, one tap away</div>
+            ${getMainUser() ? (() => {
+                const ach = getAchievements(getMainUser().id);
+                const earned = ach.filter(a => a.earned);
+                const next = ach.filter(a => !a.earned).sort((a, b) => b.pct - a.pct)[0];
+                return `
+            <button onclick="goToMyStats()" class="w-full bg-slate-900 rounded-xl shadow-sm p-3 text-left">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="star" class="w-5 h-5 text-orange-400"></i>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-[11px] font-black uppercase text-white">My Stats</div>
+                        <div class="text-[9px] text-slate-400 font-bold">${getMainUser().name}'s full analysis, one tap away</div>
+                    </div>
+                    ${earned.length ? `<div class="text-right flex-shrink-0"><div class="text-base font-black text-orange-400 leading-none">${earned.length}</div><div class="text-[6px] font-black uppercase text-slate-400">Trophies</div></div>` : ''}
                 </div>
-            </button>` : ''}
+                ${earned.length ? `<div class="flex gap-1 mt-2 items-center">
+                    ${earned.slice(-5).map(a => `<div style="width:26px;">${medalSVG(a, 26)}</div>`).join('')}
+                    ${next ? `<div class="text-[7px] font-bold text-slate-400 ml-1 truncate">Next: ${next.name} — ${Math.min(next.value || 0, next.target)}/${next.target}</div>` : ''}
+                </div>` : (next ? `<div class="text-[8px] font-bold text-slate-400 mt-1.5">First trophy: ${next.desc}</div>` : '')}
+            </button>`; })() : ''}
             <div class="grid grid-cols-2 gap-2">
                 <button onclick="goto('profiles')" class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 text-left">
                     <i data-lucide="users" class="w-5 h-5 text-orange-500 mb-1"></i>
@@ -2540,6 +2582,410 @@
     /* =========================================================================================
        VIEW: ANALYSIS
     ========================================================================================= */
+    /* =========================================================================================
+       ACHIEVEMENTS
+
+       Design rules, chosen deliberately:
+
+       1. DERIVED, NOT STORED. Trophies are recomputed from history every time, exactly like
+          every other statistic in this app. Storing "earned" flags would drift: delete a
+          dummy round and you'd keep a trophy you never actually earned, which makes the whole
+          cabinet worthless. The ONLY thing persisted is which achievement ids have already
+          been *shown* to the shooter (`db.seenAchievements`), so a new one can be celebrated
+          once rather than every render.
+
+       2. NOTHING FOR TURNING UP. Every trophy requires a real shooting outcome or genuine
+          accumulation. A cabinet full of participation medals is worth nothing and would
+          undermine the honest tone of the rest of the analysis.
+
+       3. MINIMUM SAMPLES ON ANYTHING PERCENTAGE-BASED. A personal best off a 2-target round
+          isn't a personal best. Same principle as the confidence work.
+
+       4. LOCKED TROPHIES SHOW PROGRESS. "7 of 10 stands straighted" pulls you forward in a
+          way a grey padlock doesn't.
+
+       5. ONE REWARDS DATA DISCIPLINE. "Full Notes" is earned by tagging a reason on every
+          miss in a round - the behaviour that makes the entire coaching engine work. Worth
+          nudging, since it costs nothing and pays off in every other screen.
+    ========================================================================================= */
+    const TIER_STYLE = {
+        bronze:    { fill: '#b45309', ring: '#d97706', label: 'Bronze' },
+        silver:    { fill: '#64748b', ring: '#94a3b8', label: 'Silver' },
+        gold:      { fill: '#d97706', ring: '#fbbf24', label: 'Gold' },
+        legendary: { fill: '#7c3aed', ring: '#a78bfa', label: 'Legendary' }
+    };
+    /* Single pass over a shooter's history, gathering everything the catalogue needs.
+       Kept in one function so the whole cabinet costs one walk of the data. */
+    function achievementStats(shooterId) {
+        const s = {
+            targets: 0, hits: 0, rounds: 0, grounds: new Set(),
+            straightStands: 0, biggestStraightStand: 0, straightRounds: 0,
+            longestRun: 0, bestRoundPct: 0, bestRoundLabel: '', bestRoundAt: null,
+            fullyTaggedRounds: 0, windyBest: 0, firstBarrelRounds: 0,
+            aboveAvgStreak: 0, groundPBs: 0, straightStandAt: null, straightRoundAt: null
+        };
+        const rounds = db.history
+            .filter(r => r.shooterIds.includes(shooterId) && shooterRoundAttempts(r, shooterId) > 0)
+            .sort((a, b) => (a.finishedAt || 0) - (b.finishedAt || 0));
+        const pcts = [];
+        rounds.forEach(r => {
+            const att = shooterRoundAttempts(r, shooterId);
+            const tot = shooterRoundTotal(r, shooterId);
+            s.rounds++; s.targets += att; s.hits += tot;
+            if ((r.ground || '').trim()) s.grounds.add(groundKey(r.ground));
+            const pct = Math.round(tot / att * 100);
+            pcts.push(pct);
+
+            // Personal best needs a meaningful card behind it.
+            if (att >= 20 && pct > s.bestRoundPct) {
+                s.bestRoundPct = pct;
+                s.bestRoundLabel = (r.ground || 'Unnamed') + ' ' + getUKDate(r.date);
+                s.bestRoundAt = r.finishedAt;
+            }
+            if (att >= 20 && (r.conditions?.wind === 'Windy') && pct > s.windyBest) s.windyBest = pct;
+
+            // Straights and streaks, walking the round in shooting order.
+            let run = 0, roundClean = true, roundHasTargets = false;
+            let taggedAll = true, sawMiss = false;
+            let barrels = { h1: 0, h2: 0 };
+            r.stands.forEach(st => {
+                const mine = shooterVisibleSlots(r, shooterId, st);
+                const byStand = r.hits[shooterId]?.[st.id] || {};
+                let standShots = 0, standHits = 0;
+                mine.forEach(slot => {
+                    const cell = byStand[slot.id];
+                    if (!cell || cell.result == null) return;
+                    roundHasTargets = true;
+                    standShots++;
+                    const isHit = cell.result === 'hit1' || cell.result === 'hit2';
+                    if (isHit) {
+                        standHits++; run++; s.longestRun = Math.max(s.longestRun, run);
+                        if (cell.result === 'hit1') barrels.h1++; else barrels.h2++;
+                    } else {
+                        run = 0; roundClean = false; sawMiss = true;
+                        if (!cell.missReason) taggedAll = false;
+                    }
+                });
+                // A "straight stand" needs enough targets to mean something.
+                if (standShots >= 4 && standHits === standShots) {
+                    s.straightStands++;
+                    s.biggestStraightStand = Math.max(s.biggestStraightStand, standShots);
+                    s.straightStandAt = r.finishedAt;
+                }
+            });
+            if (roundHasTargets && roundClean && att >= 20) { s.straightRounds++; s.straightRoundAt = r.finishedAt; }
+            if (sawMiss && taggedAll) s.fullyTaggedRounds++;
+            const totalHits = barrels.h1 + barrels.h2;
+            if (totalHits >= 20 && barrels.h1 / totalHits >= 0.9) s.firstBarrelRounds++;
+        });
+        // Longest run of consecutive rounds above the shooter's career average.
+        const career = s.targets ? Math.round(s.hits / s.targets * 100) : 0;
+        let streak = 0;
+        pcts.forEach(p => { if (p > career) { streak++; s.aboveAvgStreak = Math.max(s.aboveAvgStreak, streak); } else streak = 0; });
+        s.careerPct = career;
+        // A personal best at an individual ground, for grounds visited more than once.
+        const perGround = {};
+        rounds.forEach(r => {
+            const k = groundKey(r.ground || '');
+            if (!k) return;
+            (perGround[k] = perGround[k] || []).push(r);
+        });
+        s.groundPBs = Object.values(perGround).filter(list => list.length >= 3).length;
+        return s;
+    }
+    /* The catalogue. `value`/`target` drive both the earned test and the progress bar, so a
+       locked trophy always shows how close it is. */
+    function achievementCatalogue(st) {
+        return [
+            { id: 'first-round',   name: 'On the Card',      tier: 'bronze',    icon: 'flag',    desc: 'Log your first completed round.',                       value: st.rounds, target: 1 },
+            { id: 'straight-stand',name: 'Clean Stand',      tier: 'bronze',    icon: 'target',  desc: 'Straight a stand — every target broken, 4 or more.',     value: st.straightStands, target: 1, at: st.straightStandAt },
+            { id: 'straight-5',    name: 'Stand Sweeper',    tier: 'silver',    icon: 'target',  desc: 'Straight 5 stands.',                                     value: st.straightStands, target: 5 },
+            { id: 'straight-25',   name: 'Stand Master',     tier: 'gold',      icon: 'target',  desc: 'Straight 25 stands.',                                    value: st.straightStands, target: 25 },
+            { id: 'big-stand',     name: 'Perfect Ten',      tier: 'silver',    icon: 'star',    desc: 'Straight a stand of 10 or more targets.',                value: st.biggestStraightStand, target: 10 },
+            { id: 'straight-round',name: 'The Straight',     tier: 'legendary', icon: 'crown',   desc: 'A full round without a single miss.',                    value: st.straightRounds, target: 1, at: st.straightRoundAt },
+            { id: 'run-10',        name: 'Ten Up',           tier: 'bronze',    icon: 'zap',     desc: '10 targets in a row without a miss.',                    value: st.longestRun, target: 10 },
+            { id: 'run-25',        name: 'Twenty-Five Up',   tier: 'gold',      icon: 'zap',     desc: '25 targets in a row without a miss.',                    value: st.longestRun, target: 25 },
+            { id: 'run-50',        name: 'Unstoppable',      tier: 'legendary', icon: 'zap',     desc: '50 targets in a row without a miss.',                    value: st.longestRun, target: 50 },
+            { id: 'pb-50',         name: 'Half Century',     tier: 'bronze',    icon: 'trophy',  desc: 'A round of 50% or better (20+ targets).',                value: st.bestRoundPct, target: 50, at: st.bestRoundAt },
+            { id: 'pb-75',         name: 'Three Quarters',   tier: 'silver',    icon: 'trophy',  desc: 'A round of 75% or better (20+ targets).',                value: st.bestRoundPct, target: 75, at: st.bestRoundAt },
+            { id: 'pb-90',         name: 'Ninety Club',      tier: 'gold',      icon: 'trophy',  desc: 'A round of 90% or better (20+ targets).',                value: st.bestRoundPct, target: 90, at: st.bestRoundAt },
+            { id: 'vol-100',       name: 'Hundred Up',       tier: 'bronze',    icon: 'layers',  desc: 'Log 100 targets.',                                       value: st.targets, target: 100 },
+            { id: 'vol-1000',      name: 'Thousand Club',    tier: 'silver',    icon: 'layers',  desc: 'Log 1,000 targets.',                                     value: st.targets, target: 1000 },
+            { id: 'vol-5000',      name: 'Five Thousand',    tier: 'gold',      icon: 'layers',  desc: 'Log 5,000 targets.',                                     value: st.targets, target: 5000 },
+            { id: 'rounds-10',     name: 'Regular',          tier: 'bronze',    icon: 'calendar',desc: 'Complete 10 rounds.',                                    value: st.rounds, target: 10 },
+            { id: 'rounds-50',     name: 'Committed',        tier: 'gold',      icon: 'calendar',desc: 'Complete 50 rounds.',                                    value: st.rounds, target: 50 },
+            { id: 'grounds-3',     name: 'Travelling Gun',   tier: 'bronze',    icon: 'map-pin', desc: 'Shoot at 3 different grounds.',                          value: st.grounds.size, target: 3 },
+            { id: 'grounds-10',    name: 'Ground Hopper',    tier: 'gold',      icon: 'map-pin', desc: 'Shoot at 10 different grounds.',                         value: st.grounds.size, target: 10 },
+            { id: 'form-3',        name: 'In Form',          tier: 'silver',    icon: 'trending-up', desc: '3 rounds in a row above your career average.',       value: st.aboveAvgStreak, target: 3 },
+            { id: 'form-5',        name: 'Purple Patch',     tier: 'gold',      icon: 'trending-up', desc: '5 rounds in a row above your career average.',       value: st.aboveAvgStreak, target: 5 },
+            { id: 'windy',         name: 'Wind Reader',      tier: 'gold',      icon: 'wind',    desc: 'Shoot 70% or better in windy conditions (20+ targets).', value: st.windyBest, target: 70 },
+            { id: 'first-barrel',  name: 'First Barrel',     tier: 'silver',    icon: 'crosshair',desc: 'A round where 90% of your kills came off the first barrel.', value: st.firstBarrelRounds, target: 1 },
+            { id: 'notes-1',       name: 'Full Notes',       tier: 'bronze',    icon: 'edit-3',  desc: 'Tag a reason on every miss in a round.',                 value: st.fullyTaggedRounds, target: 1 },
+            { id: 'notes-10',      name: 'Diligent',         tier: 'silver',    icon: 'edit-3',  desc: 'Do it for 10 rounds — this is what powers your analysis.', value: st.fullyTaggedRounds, target: 10 },
+            { id: 'home-ground',   name: 'Home Ground',      tier: 'silver',    icon: 'home',    desc: 'Shoot 3 or more rounds at the same ground.',             value: st.groundPBs, target: 1 }
+        ].map(a => ({ ...a, earned: (a.value || 0) >= a.target, pct: Math.min(100, Math.round((a.value || 0) / a.target * 100)) }));
+    }
+    function getAchievements(shooterId) { return achievementCatalogue(achievementStats(shooterId)); }
+    /* Newly earned = earned now, and not previously acknowledged. Keyed per shooter so one
+       squad member's trophies can't suppress another's. */
+    function newAchievementsFor(shooterId) {
+        const seen = (db.seenAchievements && db.seenAchievements[shooterId]) || [];
+        return getAchievements(shooterId).filter(a => a.earned && !seen.includes(a.id));
+    }
+    function markAchievementsSeen(shooterId, list) {
+        if (!db.seenAchievements) db.seenAchievements = {};
+        const seen = db.seenAchievements[shooterId] || [];
+        db.seenAchievements[shooterId] = [...new Set([...seen, ...list.map(a => a.id)])];
+        saveDB();
+    }
+    // Hand-built medal: disc, ribbon, tier ring. Locked ones are drawn flat grey so the
+    // cabinet reads at a glance as "what I have vs what's left".
+    function medalSVG(a, size = 56) {
+        const t = TIER_STYLE[a.tier] || TIER_STYLE.bronze;
+        const fill = a.earned ? t.fill : '#e2e8f0';
+        const ring = a.earned ? t.ring : '#cbd5e1';
+        return `
+        <svg viewBox="0 0 60 68" width="${size}" height="${size * 68 / 60}" style="display:block;">
+            <path d="M20 4 L26 30 L18 30 Z" fill="${ring}" opacity="${a.earned ? 0.9 : 0.5}"/>
+            <path d="M40 4 L42 30 L34 30 Z" fill="${ring}" opacity="${a.earned ? 0.7 : 0.4}"/>
+            <circle cx="30" cy="42" r="21" fill="${fill}"/>
+            <circle cx="30" cy="42" r="21" fill="none" stroke="${ring}" stroke-width="3"/>
+            <circle cx="30" cy="42" r="14" fill="none" stroke="#ffffff" stroke-width="1" opacity="${a.earned ? 0.35 : 0.15}"/>
+            ${a.earned
+                ? `<text x="30" y="48" text-anchor="middle" font-size="15" font-weight="900" fill="#fff">★</text>`
+                : `<text x="30" y="48" text-anchor="middle" font-size="13" font-weight="900" fill="#94a3b8">${a.pct}%</text>`}
+        </svg>`;
+    }
+    function renderTrophyCabinet(shooterId) {
+        const list = getAchievements(shooterId);
+        const earned = list.filter(a => a.earned);
+        const locked = list.filter(a => !a.earned).sort((a, b) => b.pct - a.pct);
+        const byTier = t => earned.filter(a => a.tier === t).length;
+        return `
+        <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+            <div class="flex justify-between items-baseline">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Trophy Cabinet</h3>
+                <span class="text-[10px] font-black">${earned.length}<span class="text-slate-300">/${list.length}</span></span>
+            </div>
+            <div class="flex gap-1.5 flex-wrap">
+                ${['legendary', 'gold', 'silver', 'bronze'].map(t => `<span class="chip ${byTier(t) ? 'active' : ''}" style="${byTier(t) ? `background:${TIER_STYLE[t].fill}; border-color:${TIER_STYLE[t].fill};` : ''}">${TIER_STYLE[t].label} ${byTier(t)}</span>`).join('')}
+            </div>
+            ${earned.length ? `<div class="grid grid-cols-4 gap-2 pt-1">
+                ${earned.map(a => `<div class="text-center" title="${attrStr(a.desc)}">
+                    <div class="flex justify-center">${medalSVG(a, 46)}</div>
+                    <div class="text-[7px] font-black uppercase leading-tight mt-0.5">${a.name}</div>
+                </div>`).join('')}
+            </div>` : `<p class="text-[9px] text-slate-400 font-bold">Nothing won yet — straight a stand and the first one is yours.</p>`}
+            ${locked.length ? `<div class="pt-2 border-t border-slate-100 space-y-1.5">
+                <div class="text-[8px] font-black uppercase text-slate-500">Closest to unlocking</div>
+                ${locked.slice(0, 4).map(a => `<div>
+                    <div class="flex justify-between text-[9px] font-black uppercase">
+                        <span class="truncate max-w-[62%]">${a.name}</span>
+                        <span class="text-slate-400">${Math.min(a.value || 0, a.target)}/${a.target}</span>
+                    </div>
+                    <div class="bar-track mt-0.5"><div class="bar-fill" style="width:${a.pct}%; background:${TIER_STYLE[a.tier].ring};"></div></div>
+                    <div class="text-[7px] font-bold text-slate-400">${a.desc}</div>
+                </div>`).join('')}
+            </div>` : ''}
+        </section>`;
+    }
+    /* Celebration overlay shown once, right after a round that unlocked something. This is the
+       moment it actually matters - immediately after the shooting, not buried in a menu. */
+    let pendingTrophies = [];
+    function showTrophyPopup(list) {
+        if (!list.length) return;
+        pendingTrophies = list;
+        const box = document.getElementById('trophy-list');
+        document.getElementById('trophy-heading').textContent = list.length === 1 ? 'Trophy Unlocked' : `${list.length} Trophies Unlocked`;
+        box.innerHTML = list.map(a => `
+            <div class="flex items-center gap-3 bg-slate-800 rounded-xl p-2.5">
+                <div class="flex-shrink-0">${medalSVG(a, 52)}</div>
+                <div class="min-w-0">
+                    <div class="text-[11px] font-black uppercase text-white">${a.name}</div>
+                    <div class="text-[8px] font-black uppercase" style="color:${TIER_STYLE[a.tier].ring}">${TIER_STYLE[a.tier].label}</div>
+                    <div class="text-[8px] font-bold text-slate-300 mt-0.5">${a.desc}</div>
+                </div>
+            </div>`).join('');
+        document.getElementById('trophy-backdrop').classList.remove('hidden');
+    }
+    function closeTrophyPopup() {
+        document.getElementById('trophy-backdrop').classList.add('hidden');
+        pendingTrophies = [];
+    }
+
+    /* =========================================================================================
+       ANALYSIS VISUALS
+
+       All hand-built SVG rather than another charting library: it keeps the app dependency-free
+       (Chart.js is already the one exception, for the trend line), works offline with no CDN
+       risk, inherits dark mode via currentColor/CSS vars, and scales cleanly on a phone.
+
+       The three additions are chosen because each one answers a question the old bar rows
+       couldn't answer at a glance - not for decoration:
+         - the gauge shows the headline number AND how settled it is, in one shape;
+         - the miss map turns four directional miss reasons into a picture of WHERE you miss;
+         - the heatmap turns the presentation x distance cross-tab from a long list into a grid
+           you can actually read a pattern off.
+    ========================================================================================= */
+    // Shared red -> amber -> green scale, so a colour means the same thing everywhere.
+    function pctColour(pct) {
+        if (pct == null) return '#cbd5e1';
+        if (pct < 35) return '#dc2626';
+        if (pct < 50) return '#ea580c';
+        if (pct < 65) return '#f59e0b';
+        if (pct < 80) return '#65a30d';
+        return '#16a34a';
+    }
+    /* Radial gauge. The pale inner band is the confidence interval, so the shape itself shows
+       how much to trust the number - a wide band is immediately visible as "not settled yet"
+       without needing to read any small print. */
+    function svgGauge(pct, ci, size = 132) {
+        const r = 46, c = 2 * Math.PI * r;
+        const val = Math.max(0, Math.min(100, pct || 0));
+        const lo = ci ? Math.max(0, Math.min(100, ci.lo)) : null;
+        const hi = ci ? Math.max(0, Math.min(100, ci.hi)) : null;
+        const bandLen = (lo !== null && hi !== null) ? (hi - lo) / 100 * c : 0;
+        return `
+        <svg viewBox="0 0 120 120" width="${size}" height="${size}" style="display:block;">
+            <circle cx="60" cy="60" r="${r}" fill="none" stroke="#e2e8f0" stroke-width="11" class="gauge-track"/>
+            ${bandLen > 0 ? `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${pctColour(pct)}" stroke-opacity="0.22"
+                stroke-width="11" stroke-dasharray="${bandLen} ${c}" stroke-dashoffset="${-(lo / 100 * c)}"
+                transform="rotate(-90 60 60)"/>` : ''}
+            <circle cx="60" cy="60" r="${r}" fill="none" stroke="${pctColour(pct)}" stroke-width="11" stroke-linecap="round"
+                stroke-dasharray="${val / 100 * c} ${c}" transform="rotate(-90 60 60)"/>
+            <text x="60" y="58" text-anchor="middle" font-size="27" font-weight="900" fill="${pctColour(pct)}">${Math.round(val)}<tspan font-size="13">%</tspan></text>
+            <text x="60" y="74" text-anchor="middle" font-size="8" font-weight="800" fill="#94a3b8" letter-spacing="1">ACCURACY</text>
+            ${ci && ci.half > 12 ? `<text x="60" y="88" text-anchor="middle" font-size="7" font-weight="700" fill="#94a3b8">${ci.lo}-${ci.hi}% range</text>` : ''}
+        </svg>`;
+    }
+    /* Form guide: the last few rounds as bars, coloured against the shooter's own average.
+       Deliberately a "recent form" strip rather than a full trend chart - it answers "how am I
+       going right now" in one glance, which the long-run trend line doesn't. */
+    function renderFormStrip(shooterId, avgPct) {
+        const rounds = db.history
+            .filter(r => r.shooterIds.includes(shooterId) && shooterRoundAttempts(r, shooterId) > 0)
+            .sort((a, b) => (a.finishedAt || 0) - (b.finishedAt || 0))
+            .slice(-8);
+        if (!rounds.length) return `<p class="text-[8px] text-slate-400 font-bold">No completed rounds yet.</p>`;
+        return `
+            <div class="flex items-end gap-1 h-14">
+                ${rounds.map(r => {
+                    const att = shooterRoundAttempts(r, shooterId);
+                    const pct = Math.round(shooterRoundTotal(r, shooterId) / att * 100);
+                    return `<div class="flex-1 flex flex-col items-center justify-end h-full" title="${attrStr(r.ground || 'Unnamed')} ${getUKDate(r.date)} — ${pct}%">
+                        <span class="text-[7px] font-black" style="color:${pctColour(pct)}">${pct}</span>
+                        <div style="width:100%; height:${Math.max(4, pct)}%; background:${pctColour(pct)}; border-radius:3px 3px 0 0; opacity:0.9;"></div>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div class="text-[7px] font-black uppercase text-slate-400 mt-1">Last ${rounds.length} round${rounds.length === 1 ? '' : 's'} · oldest to newest${avgPct != null ? ` · your average ${avgPct}%` : ''}</div>`;
+    }
+    /* MISS MAP
+       The four directional miss reasons (behind / in front / above / below) describe a position
+       in space relative to the bird, so they're far more legible as a picture than as a tally.
+       Bird travel is drawn left-to-right purely as a reference frame - "behind" means behind the
+       bird whichever way it was actually going, which is how a shooter thinks about it.
+
+       Non-directional reasons (didn't mount, lost sight of it, unsure) are shown separately
+       rather than forced onto the diagram, because placing them in space would be inventing
+       information that isn't in the data. */
+    function renderMissMap(shots) {
+        const tagged = shots.filter(s => s.result === 'miss' && s.missReason);
+        if (!tagged.length) return '';
+        const count = reason => tagged.filter(s => s.missReason === reason).length;
+        const dirs = [
+            { key: 'Above', n: count('Above'), x: 100, y: 26, label: 'ABOVE' },
+            { key: 'Below', n: count('Below'), x: 100, y: 124, label: 'BELOW' },
+            { key: 'Behind', n: count('Behind'), x: 34, y: 75, label: 'BEHIND' },
+            { key: 'In front', n: count('In front'), x: 166, y: 75, label: 'IN FRONT' }
+        ];
+        const other = ["Didn't mount", 'Lost sight of it', 'Unsure']
+            .map(k => ({ k, n: count(k) })).filter(o => o.n > 0);
+        const maxN = Math.max(1, ...dirs.map(d => d.n));
+        const directional = dirs.reduce((a, d) => a + d.n, 0);
+        const worst = dirs.slice().sort((a, b) => b.n - a.n)[0];
+        return `
+        <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+            <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Miss Map</h3>
+            <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">Where your shot goes when you miss</p>
+            <div class="flex justify-center">
+                <svg viewBox="0 0 200 150" width="100%" style="max-width:280px;">
+                    <!-- travel reference -->
+                    <line x1="18" y1="75" x2="182" y2="75" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 3"/>
+                    <line x1="100" y1="14" x2="100" y2="136" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 3"/>
+                    ${dirs.map(d => d.n ? `
+                        <circle cx="${d.x}" cy="${d.y}" r="${12 + (d.n / maxN) * 20}" fill="${pctColour(0)}" fill-opacity="${0.14 + (d.n / maxN) * 0.4}"/>
+                        <text x="${d.x}" y="${d.y + 5}" text-anchor="middle" font-size="14" font-weight="900" fill="#b91c1c">${d.n}</text>
+                    ` : '').join('')}
+                    ${dirs.map(d => `<text x="${d.x}" y="${d.y + (d.key === 'Above' ? -24 : d.key === 'Below' ? 30 : -22)}" text-anchor="middle" font-size="6.5" font-weight="800" fill="#94a3b8" letter-spacing="0.5">${d.label}</text>`).join('')}
+                    <!-- the clay -->
+                    <ellipse cx="100" cy="75" rx="11" ry="5" fill="#f97316"/>
+                    <path d="M116 75 l9 0 m-3 -3 l3 3 l-3 3" stroke="#cbd5e1" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+                    <text x="100" y="147" text-anchor="middle" font-size="6" font-weight="700" fill="#cbd5e1">bird travelling this way →</text>
+                </svg>
+            </div>
+            ${/* A direction is only called out when it genuinely dominates. With four zones an
+                  even split is 25% each, so without this threshold the map would confidently
+                  announce "mostly behind" off 2 of 8 - the same noise-as-insight trap the miss
+                  pattern logic already guards against. 40% is the floor for a real lean. */
+              worst && directional >= 4 && (worst.n / directional) >= 0.4
+                ? `<div class="bg-orange-50 border border-orange-200 rounded-lg p-2">
+                <div class="text-[9px] font-black uppercase text-orange-600">Mostly ${worst.key.toLowerCase()} — ${worst.n} of ${directional} placed misses (${Math.round(worst.n / directional * 100)}%)</div>
+                ${missReasonAdvice(worst.key) ? `<div class="text-[8px] font-bold text-slate-500 mt-0.5">${missReasonAdvice(worst.key)}</div>` : ''}
+            </div>` : `<p class="text-[8px] text-slate-400 font-bold text-center">${directional < 4 ? 'Not enough placed misses yet to read a direction into.' : 'Your misses are spread fairly evenly — no single direction dominates.'}</p>`}
+            ${other.length ? `<div class="flex flex-wrap gap-1.5 pt-1 border-t border-slate-100">
+                ${other.map(o => `<span class="chip">${o.k} · ${o.n}</span>`).join('')}
+                <span class="text-[7px] font-bold text-slate-400 self-center">not placed in space, so kept off the map</span>
+            </div>` : ''}
+        </section>`;
+    }
+    /* PRESENTATION x DISTANCE HEATMAP
+       Replaces a long list of "Crosser (L→R) — Far  42%" rows. The whole point of that cross-tab
+       is spotting a pattern (e.g. everything falls apart at distance, or only on one presentation),
+       and a grid makes that visible instantly where a list buries it. Cells with no data are
+       explicitly blank rather than shown as 0%, which would read as "missed them all". */
+    function renderHeatmap(shots) {
+        const bands = (db.presets.distanceBands || []).filter(b =>
+            shots.some(s => s.distance === b));
+        const withDist = shots.filter(s => s.distance && s.distance !== '(not set)');
+        if (!bands.length || !withDist.length) return '';
+        const presRows = [...new Set(withDist.map(s => s.presentation))];
+        const cell = (pres, band) => {
+            const arr = withDist.filter(s => s.presentation === pres && s.distance === band);
+            if (!arr.length) return null;
+            const hits = arr.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
+            return { pct: Math.round(hits / arr.length * 100), n: arr.length };
+        };
+        const rows = presRows.map(p => ({
+            pres: p,
+            cells: bands.map(b => cell(p, b)),
+            overall: (() => {
+                const arr = withDist.filter(s => s.presentation === p);
+                const hits = arr.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
+                return arr.length ? Math.round(hits / arr.length * 100) : 0;
+            })()
+        })).sort((a, b) => a.overall - b.overall);
+        return `
+            <div data-hscroll="heatmap" class="overflow-x-auto scrollbar-hide -mx-1 px-1">
+                <div style="min-width:${100 + bands.length * 54}px;">
+                    <div class="flex gap-1 mb-1">
+                        <div style="width:96px;" class="flex-shrink-0"></div>
+                        ${bands.map(b => `<div style="width:50px;" class="flex-shrink-0 text-[7px] font-black uppercase text-slate-400 text-center leading-tight">${b}</div>`).join('')}
+                    </div>
+                    ${rows.map(row => `<div class="flex gap-1 mb-1 items-center">
+                        <div style="width:96px;" class="flex-shrink-0 text-[8px] font-black uppercase truncate">${row.pres}</div>
+                        ${row.cells.map(c => c
+                            ? `<div style="width:50px; background:${pctColour(c.pct)}; opacity:${c.n < 4 ? 0.45 : 1};" class="flex-shrink-0 rounded-md py-1.5 text-center" title="${c.n} shots">
+                                   <div class="text-[11px] font-black text-white leading-none">${c.pct}</div>
+                                   <div class="text-[6px] font-bold text-white opacity-80">${c.n}</div>
+                               </div>`
+                            : `<div style="width:50px;" class="flex-shrink-0 rounded-md py-1.5 bg-slate-50 border border-slate-100 text-center text-[8px] font-bold text-slate-300">–</div>`
+                        ).join('')}
+                    </div>`).join('')}
+                </div>
+            </div>
+            <p class="text-[8px] text-slate-400 font-bold">Number in each cell is hit %, small figure below it is how many shots. Faded cells have under 4 shots. Blank means you haven't shot that combination — not that you missed them.</p>`;
+    }
     /* `ci` is optional so existing callers that pass plain numbers (e.g. the fatigue
        buckets) keep working unchanged. When present, a wide interval is drawn as a faint
        band behind the bar - a visual cue that the number is soft without needing the
@@ -2637,13 +3083,23 @@
 
             ${shots.length === 0 ? `<p class="text-center text-[10px] font-bold text-slate-400 py-6">No tagged shots yet for ${p.name}. Score a round with stand tagging to see analysis here.</p>` : `
 
-            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
-                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Career Totals</h3>
-                <div class="grid grid-cols-4 gap-2 text-center">
-                    <div><div class="text-xl font-black">${careerTotals.shots}</div><div class="text-[7px] font-black uppercase text-slate-400">Shots Fired</div></div>
-                    <div><div class="text-xl font-black text-green-600">${careerTotals.hits}</div><div class="text-[7px] font-black uppercase text-slate-400">Hits</div></div>
-                    <div><div class="text-xl font-black text-red-500">${careerTotals.misses}</div><div class="text-[7px] font-black uppercase text-slate-400">Misses</div></div>
-                    <div><div class="text-xl font-black text-orange-500">${careerTotals.pct}%</div><div class="text-[7px] font-black uppercase text-slate-400">Accuracy</div></div>
+            <!-- HERO CARD: the headline number as a gauge whose pale band is the confidence
+                 interval, next to a recent-form strip. One glance gives the number, how much to
+                 trust it, and whether it's heading the right way. -->
+            <section class="hero-card rounded-xl shadow-sm border border-slate-200 p-3">
+                <div class="flex items-center gap-3">
+                    <div class="flex-shrink-0">${svgGauge(careerTotals.pct, wilsonInterval(careerTotals.hits, careerTotals.shots))}</div>
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Career Totals</h3>
+                        <div class="grid grid-cols-3 gap-1 mt-1.5 text-center">
+                            <div><div class="text-base font-black leading-none">${careerTotals.shots}</div><div class="text-[6px] font-black uppercase text-slate-400 mt-0.5">Targets</div></div>
+                            <div><div class="text-base font-black text-green-600 leading-none">${careerTotals.hits}</div><div class="text-[6px] font-black uppercase text-slate-400 mt-0.5">Hits</div></div>
+                            <div><div class="text-base font-black text-red-500 leading-none">${careerTotals.misses}</div><div class="text-[6px] font-black uppercase text-slate-400 mt-0.5">Misses</div></div>
+                        </div>
+                        <div class="mt-2 pt-2 border-t border-slate-100">
+                            ${renderFormStrip(shooterId, careerTotals.pct)}
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -2710,10 +3166,14 @@
                 </section>` : ''}
             </div>
 
+            ${renderTrophyCabinet(shooterId)}
+
+            ${renderMissMap(shots)}
+
             ${byPresDistance.length ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
                 <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Hit % by Presentation × Distance</h3>
                 <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">e.g. spot far crossers vs close crossers</p>
-                ${byPresDistance.map(t => barRow(t.key, t.pct, t.attempts, t.lowSample, t.ci)).join('')}
+                ${renderHeatmap(shots)}
             </section>` : ''}
 
             <section class="bg-slate-900 text-white rounded-xl shadow-sm p-3 space-y-2">
