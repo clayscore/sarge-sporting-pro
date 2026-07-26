@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sarge Sporting Pro</title>
+    <title>Clayscore</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0f172a">
@@ -56,6 +56,21 @@
         .hit2-bg { background-color: #65a30d !important; color: white !important; border-color: #4d7c0f !important; }
         .miss-bg { background-color: #ef4444 !important; color: white !important; border-color: #b91c1c !important; }
         .first-up-highlight { animation: lead-pulse 2s infinite; border: 2px solid #f97316 !important; }
+        /* Whose turn it is. Deliberately strong contrast rather than a subtle tint - the
+           whole complaint was that you couldn't tell at a glance which row to tap with a
+           squad on screen. Idle rows are dimmed but NOT disabled: pointer events stay on,
+           because squads shoot out of order and the app must never block a real correction. */
+        /* Hit and Miss must be EXACTLY the same size. They were both declared `flex-1`, which
+           looks like it guarantees that, but flex items default to `min-width: auto` - they
+           can't shrink below their own content. "Miss" is a wider word than "Hit", so it
+           claimed more space, and glove mode's larger font made it obvious. Forcing a zero
+           basis and zero min-width makes the split exactly even whatever the labels say.
+           (Belt and braces alongside the `min-w-0` class on the buttons themselves, since
+           this pair carries the actual score and must never look weighted towards a miss.) */
+        .glove-hitmiss-btn { flex: 1 1 0 !important; min-width: 0 !important; }
+        .shooter-current { background: #fff7ed; border-left: 4px solid #f97316; }
+        .shooter-idle { opacity: 0.45; border-left: 4px solid transparent; }
+        .shooter-idle:active, .shooter-idle:focus-within { opacity: 1; }
         @keyframes lead-pulse {
             0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
             70% { box-shadow: 0 0 0 10px rgba(249, 115, 22, 0); }
@@ -69,6 +84,25 @@
         .navbtn { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 8px; font-weight: 900; text-transform: uppercase; color: #94a3b8; padding: 6px 4px; border-radius: 10px; flex: 1; }
         .navbtn.active { color: #f97316; background: #1e293b; }
         .hidden-view { display: none !important; }
+        /* Confirm/notice dialog */
+        #modal-backdrop { position: fixed; inset: 0; background: rgba(8, 12, 20, 0.72); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        #modal-backdrop.hidden { display: none !important; }
+        #modal-box { background: #fff; border-radius: 16px; padding: 18px; width: 100%; max-width: 340px; box-shadow: 0 18px 50px rgba(0,0,0,0.45); }
+        #modal-title { font-size: 15px; font-weight: 900; text-transform: uppercase; font-style: italic; letter-spacing: -0.02em; color: #0f172a; }
+        #modal-message { font-size: 11px; font-weight: 700; color: #64748b; margin-top: 8px; line-height: 1.5; }
+        #modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+        #modal-actions button { flex: 1 1 0; min-width: 0; padding: 13px 10px; border-radius: 12px; font-size: 11px; font-weight: 900; text-transform: uppercase; }
+        #modal-cancel { background: #fff; border: 1px solid #cbd5e1; color: #475569; }
+        #modal-confirm { background: #0f172a; color: #fff; }
+        #modal-confirm.danger { background: #dc2626; }
+        #modal-actions button.single { flex: 1 1 100%; }
+        body.dark #modal-box { background: #111a2b; }
+        body.dark #modal-title { color: #e8edf5; }
+        body.dark #modal-message { color: #b4c0d0; }
+        body.dark #modal-cancel { background: #16233a; border-color: #2c3d59; color: #cbd5e1; }
+        body.glove-mode #modal-actions button { padding: 18px 12px; font-size: 14px; }
+        body.glove-mode #modal-title { font-size: 18px; }
+        body.glove-mode #modal-message { font-size: 13px; }
         /* Glove mode: scales up every tappable/readable element on the scoring
            screen (buttons, target cards, dropdowns, stand nav) for shooting in
            gloves or cold weather. Scoped by a `glove-mode` class toggled on
@@ -92,6 +126,46 @@
         body.glove-mode .glove-pairtype-btn { font-size: 12px !important; padding: 10px 14px !important; }
         body.glove-mode .glove-header-btn { padding: 12px !important; }
         body.glove-mode .glove-header-btn i { width: 20px !important; height: 20px !important; }
+        /* DARK MODE (2026-07-26)
+           Requested as "a must" for battery preservation - on the OLED screens most phones
+           now use, lit pixels draw the power, so a near-black background genuinely extends
+           a day's shooting. Also far easier on the eyes in flat winter light.
+
+           Implemented by overriding the Tailwind utility classes the app already uses, rather
+           than rewriting every template string - same reasoning as glove mode, and it means
+           new UI inherits the theme automatically as long as it sticks to the existing
+           palette. Background is #070b12 rather than pure black: near-black keeps the OLED
+           power saving but avoids the harsh smearing pure black gives on dark UI. */
+        body.dark { background: #070b12 !important; color: #e2e8f0; }
+        body.dark .bg-white { background: #111a2b !important; }
+        body.dark .bg-slate-50, body.dark .bg-slate-50\/40 { background: #0d1524 !important; }
+        body.dark .bg-slate-100 { background: #16233a !important; }
+        body.dark .bg-slate-900 { background: #0b1220 !important; }
+        body.dark .bg-slate-800 { background: #16233a !important; }
+        body.dark .text-slate-900 { color: #e8edf5 !important; }
+        body.dark .text-slate-600, body.dark .text-slate-500 { color: #b4c0d0 !important; }
+        body.dark .text-slate-400 { color: #8998ac !important; }
+        body.dark .text-slate-300 { color: #6b7a90 !important; }
+        body.dark .border-slate-200, body.dark .border-slate-100, body.dark .border-slate-300 { border-color: #24334c !important; }
+        body.dark .border-slate-700, body.dark .border-slate-600 { border-color: #2c3d59 !important; }
+        body.dark .chip { background: #16233a; color: #cbd5e1; border-color: #24334c; }
+        body.dark .chip.active { background: #f97316; color: #fff; border-color: #f97316; }
+        body.dark .bar-track { background: #1b2740; }
+        body.dark .shooter-current { background: #1c1408; border-left-color: #f97316; }
+        /* Tinted panels: keep the hue as a signal but drop the luminance right down. */
+        body.dark .bg-orange-50, body.dark .bg-orange-50\/40 { background: #1c1408 !important; }
+        body.dark .border-orange-200, body.dark .border-orange-100 { border-color: #4a2f10 !important; }
+        body.dark .text-orange-600 { color: #fb923c !important; }
+        body.dark .bg-green-50 { background: #08170f !important; }
+        body.dark .border-green-200, body.dark .border-green-100 { border-color: #17402a !important; }
+        body.dark .text-green-700 { color: #4ade80 !important; }
+        body.dark .bg-red-50 { background: #1a0b0b !important; }
+        body.dark .border-red-200, body.dark .border-red-100 { border-color: #4c1d1d !important; }
+        body.dark .text-red-600 { color: #f87171 !important; }
+        body.dark input, body.dark select, body.dark textarea { background: #16233a !important; color: #e2e8f0 !important; border-color: #24334c !important; }
+        body.dark input::placeholder, body.dark textarea::placeholder { color: #64748b !important; }
+        /* Hit/miss buttons must stay unmistakable - these carry the actual score. */
+        body.dark .glove-hitmiss-btn.bg-white { background: #16233a !important; color: #94a3b8 !important; }
         /* Sitewide glove-mode rules (2026-07-14): the hooks above were tuned
            specifically for the dense scoring screen. Paul asked for glove mode
            to apply everywhere, not just scoring - Home, Shooters, History,
@@ -123,7 +197,7 @@
                     </svg>
                 </div>
                 <div>
-                    <h1 class="text-base font-bold tracking-tight uppercase italic leading-none">Sporting Pro</h1>
+                    <h1 class="text-base font-bold tracking-tight uppercase italic leading-none">Clayscore</h1>
                     <span class="text-[7px] text-green-400 font-bold uppercase flex items-center gap-1 mt-0.5"><i data-lucide="wifi-off" size="7"></i> Offline Ready</span>
                 </div>
             </div>
@@ -145,7 +219,7 @@
         </div>
         <table id="cap-grid"></table>
         <div style="margin-top: 30px; display: flex; justify-content: space-between; align-items: center; font-size: 11pt; font-weight: bold;">
-            <span>Generated by Sarge</span>
+            <span>Generated by Clayscore</span>
             <div style="border-top: 1.5pt solid black; width: 300px; text-align: center; padding-top: 8px;">SCORER / SHOOTER SIGNATURE</div>
         </div>
     </div>
@@ -158,7 +232,23 @@
         <table id="p-grid"></table>
         <div class="print-notes"><strong>NOTES:</strong> <span id="p-notes"></span></div>
         <div class="signature-section"><div class="sig-line">SIGNATURE</div></div>
-        <div style="text-align: center; margin-top: 20px; font-size: 8pt; font-weight: bold; color: #666;">Generated by Sarge</div>
+        <div style="text-align: center; margin-top: 20px; font-size: 8pt; font-weight: bold; color: #666;">Generated by Clayscore</div>
+    </div>
+    <!-- Analysis report, built on demand for PDF export. Kept out of the normal flow and
+         only shown to the printer, same approach as the scorecard print view above. -->
+    <div class="hidden print-only" id="analysis-print-view"></div>
+    <!-- In-app confirm/notice dialog. Replaces the browser's native confirm()/alert(),
+         which prefix every message with "clayscore.github.io says" - unavoidable browser
+         chrome that looks like a website warning rather than part of the app. -->
+    <div id="modal-backdrop" class="hidden no-print" onclick="dismissModalBackdrop(event)">
+        <div id="modal-box" onclick="event.stopPropagation()">
+            <h3 id="modal-title"></h3>
+            <p id="modal-message"></p>
+            <div id="modal-actions">
+                <button id="modal-cancel" onclick="closeModal(false)"></button>
+                <button id="modal-confirm" onclick="closeModal(true)"></button>
+            </div>
+        </div>
     </div>
     <input type="file" id="import-file-input" accept="application/json" class="hidden" onchange="handleImportFile(this.files[0])">
 
@@ -169,12 +259,107 @@
     const DB_KEY = 'sarge_pwa_pro_v3';
     let idCounter = 0;
     function newId() { return `${Date.now()}_${idCounter++}`; }
+    /* Escapes a value for safe use inside a single-quoted JS string that itself sits inside
+       a double-quoted HTML attribute - i.e. onclick="fn('HERE')".
+
+       This is not theoretical tidying: the default miss reason "Didn't mount" was silently
+       unclickable, because its apostrophe closed the JS string early and the handler was a
+       syntax error. Any user-added preset containing an apostrophe (or a quote, or a
+       backslash) would break the same way.
+
+       Order matters - backslashes first, or the escapes we add get re-escaped. Double
+       quotes become &quot; because they'd otherwise terminate the HTML attribute; the
+       parser converts that back to a plain " before the JS ever runs. */
+    function jsStr(v) {
+        return String(v === null || v === undefined ? '' : v)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '&quot;');
+    }
+    /* Escapes free text going into a double-quoted HTML attribute, e.g. value="HERE".
+       Same class of problem as jsStr: a ground called `Bob"s Farm` or a shooter name with
+       a quote in it would otherwise terminate the attribute and mangle the field. Ampersand
+       first, or the entities we insert get double-escaped. */
+    function attrStr(v) {
+        return String(v === null || v === undefined ? '' : v)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;');
+    }
+
+    /* =========================================================================================
+       DIALOGS
+
+       The browser's native confirm()/alert() prefix every message with the site's domain -
+       "clayscore.github.io says..." - which is browser chrome and cannot be changed or styled.
+       In an installed app it reads like a security warning from a website rather than a
+       question from the app, so all of them are replaced with this in-app dialog.
+
+       Deliberately CALLBACK-based rather than promise/async. A promise API would force every
+       caller (and every test that drives them) to become async for no user-visible benefit;
+       a callback keeps all the existing call sites synchronous in shape and means the whole
+       test suite continues to work by stubbing showConfirm exactly as it stubbed confirm().
+    ========================================================================================= */
+    let modalOnConfirm = null;
+    function showConfirm(opts, onConfirm) {
+        modalOnConfirm = onConfirm || null;
+        document.getElementById('modal-title').textContent = opts.title || 'Are you sure?';
+        document.getElementById('modal-message').textContent = opts.message || '';
+        const cancel = document.getElementById('modal-cancel');
+        const ok = document.getElementById('modal-confirm');
+        cancel.textContent = opts.cancelText || 'Cancel';
+        cancel.classList.remove('hidden');
+        ok.textContent = opts.confirmText || 'Confirm';
+        ok.classList.toggle('danger', !!opts.danger);
+        ok.classList.remove('single');
+        document.getElementById('modal-backdrop').classList.remove('hidden');
+    }
+    /* A one-button message, replacing alert(). */
+    function showNotice(title, message) {
+        modalOnConfirm = null;
+        document.getElementById('modal-title').textContent = title;
+        document.getElementById('modal-message').textContent = message || '';
+        const cancel = document.getElementById('modal-cancel');
+        const ok = document.getElementById('modal-confirm');
+        cancel.classList.add('hidden');
+        ok.textContent = 'OK';
+        ok.classList.remove('danger');
+        ok.classList.add('single');
+        document.getElementById('modal-backdrop').classList.remove('hidden');
+    }
+    function closeModal(confirmed) {
+        document.getElementById('modal-backdrop').classList.add('hidden');
+        const cb = modalOnConfirm;
+        modalOnConfirm = null;
+        if (confirmed && cb) cb();
+    }
+    // Tapping the dark area behind the box cancels - matches the platform convention, and
+    // is safe because cancel is always the non-destructive choice here.
+    function dismissModalBackdrop(e) {
+        if (e && e.target && e.target.id === 'modal-backdrop') closeModal(false);
+    }
 
     function defaultPresets() {
         return {
             clayTypes: ['Standard', 'Midi', 'Mini', 'Battue', 'Rabbit', 'Flash/Zap', 'Ballistic'],
-            presentations: ['Crosser (L→R)', 'Crosser (R→L)', 'Incomer', 'Outgoer/Going Away', 'Quartering In', 'Quartering Away', 'Springing Teal', 'Looper', 'Dropper', 'Driven', 'Overhead'],
-            missReasons: ['Behind', 'In front', 'Above', 'Below', "Didn't mount", 'Lost sight of it'],
+            /* Direction is baked into the preset name for every presentation that has a
+               left/right character - i.e. all of them except Driven and Overhead, which come
+               straight at or over you. Paul chose this over a separate direction field:
+               simpler, no migration of tagged rounds, at the cost of a longer dropdown and
+               not being able to analyse direction on its own. */
+            presentations: [
+                'Crosser (L→R)', 'Crosser (R→L)',
+                'Incomer (L→R)', 'Incomer (R→L)',
+                'Outgoer (L→R)', 'Outgoer (R→L)',
+                'Quartering In (L→R)', 'Quartering In (R→L)',
+                'Quartering Away (L→R)', 'Quartering Away (R→L)',
+                'Springing Teal (L→R)', 'Springing Teal (R→L)',
+                'Looper (L→R)', 'Looper (R→L)',
+                'Dropper (L→R)', 'Dropper (R→L)',
+                'Driven', 'Overhead'
+            ],
+            // 'Unsure' is deliberately last, and is excluded from miss-pattern detection -
+            // see NON_DIAGNOSTIC_MISS_REASONS.
+            missReasons: ['Behind', 'In front', 'Above', 'Below', "Didn't mount", 'Lost sight of it', 'Unsure'],
             windOptions: ['Calm', 'Breezy', 'Windy'],
             lightOptions: ['Bright', 'Overcast', 'Flat/Dull'],
             chokes: ['Cylinder', 'Skeet', 'Quarter (1/4)', 'Half (1/2)', 'Three-Quarter (3/4)', 'Full'],
@@ -184,7 +369,7 @@
         };
     }
     function defaultDB() {
-        return { profiles: [], presets: defaultPresets(), history: [], activeRound: null, view: 'home', analysisShooterId: null, historyRoundId: null, avgWindow: 6, gloveMode: false, groundLocations: {}, autoBackup: true, lastAutoBackupAt: null };
+        return { profiles: [], presets: defaultPresets(), history: [], activeRound: null, view: 'home', analysisShooterId: null, historyRoundId: null, avgWindow: 6, gloveMode: false, darkMode: false, groundLocations: {}, autoBackup: true, lastAutoBackupAt: null, randomiseSquadOrder: true, grounds: [] };
     }
     let db = defaultDB();
     // Glove mode scales up buttons/cards/dropdowns on the scoring screen for
@@ -193,6 +378,18 @@
     // class on <body> (set in render()) rather than per-view state, so it
     // survives navigation and CSS in the <style> block handles the sizing.
     function toggleGloveMode() { db.gloveMode = !db.gloveMode; saveDB(); render(); }
+    /* Dark mode. Also updates the theme-color meta tag so the Android status bar and the
+       TWA's own chrome match the app instead of staying light. */
+    function toggleDarkMode() {
+        db.darkMode = !db.darkMode;
+        saveDB(); render();
+    }
+    function applyThemeColor() {
+        try {
+            const meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute('content', db.darkMode ? '#070b12' : '#0f172a');
+        } catch (e) {}
+    }
     function saveDB() { try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch (e) {} }
     function loadDB() {
         const s = localStorage.getItem(DB_KEY);
@@ -201,9 +398,30 @@
                 const parsed = JSON.parse(s);
                 db = Object.assign(defaultDB(), parsed);
                 db.presets = Object.assign(defaultPresets(), db.presets || {});
-                // Migration: make sure newly-added default presentation options show up
-                // even for a save file whose presentations array predates them.
-                ['Driven', 'Overhead'].forEach(v => { if (!db.presets.presentations.includes(v)) db.presets.presentations.push(v); });
+                /* Migration: newly-added default preset options must show up even for a save
+                   file that predates them. Object.assign only fills in whole missing keys,
+                   not new entries inside an array the user already has.
+
+                   Deliberately additive - existing tagged rounds keep whatever presentation
+                   string they were scored with (e.g. a plain "Incomer" from before direction
+                   variants existed), so history and analysis stay intact. Those old values
+                   simply won't match the new directional ones in breakdowns, which is
+                   correct: we genuinely don't know which way that bird was going. */
+                const ensurePresets = (list, values) => {
+                    if (!Array.isArray(db.presets[list])) return;
+                    values.forEach(v => { if (!db.presets[list].includes(v)) db.presets[list].push(v); });
+                };
+                ensurePresets('presentations', defaultPresets().presentations);
+                ensurePresets('missReasons', ['Unsure']);
+                /* Backfill the saved-grounds list from rounds already in history, so the
+                   feature is useful immediately rather than only learning grounds from here
+                   on. Deduplicated on the same case-insensitive key used everywhere else. */
+                if (!Array.isArray(db.grounds)) db.grounds = [];
+                db.history.forEach(r => {
+                    const g = (r.ground || '').trim();
+                    if (g && !db.grounds.some(x => groundKey(x) === groundKey(g))) db.grounds.push(g);
+                });
+                db.grounds.sort((a, b) => a.localeCompare(b));
                 return true;
             } catch (e) {}
         }
@@ -215,7 +433,7 @@
             ground: '', date: new Date().toISOString().split('T')[0], event: '', notes: '', discipline: 'ESP',
             conditions: { wind: '', light: '', auto: null, readings: [], note: '' }, equipment: { gunId: '', gunName: '', cartridge: '' },
             shooterIds: [], stands: [], hits: {}, chokes: {}, activeIdx: 0, isLocked: false, editingTagsForStandId: null,
-            expandedMissKey: null
+            expandedMissKey: null, perStandLimit: {}
         };
     }
     function activeRound() { return db.activeRound; }
@@ -269,9 +487,14 @@
     }
     function updateProfile(id, field, value) { const p = getProfile(id); if (p) { p[field] = value; saveDB(); } }
     function deleteProfile(id) {
-        if (!confirm('Delete this shooter profile? Their past round history stays saved but will show as "Unknown Shooter".')) return;
-        db.profiles = db.profiles.filter(p => p.id !== id);
-        saveDB(); render();
+        showConfirm({
+            title: 'Delete Shooter?',
+            message: 'Their past rounds stay saved, but will show as "Unknown Shooter". This cannot be undone.',
+            confirmText: 'Delete', danger: true
+        }, () => {
+            db.profiles = db.profiles.filter(p => p.id !== id);
+            saveDB(); render();
+        });
     }
     function setMainUser(id) {
         db.profiles.forEach(p => { p.isMainUser = (p.id === id); if (!p.guns) p.guns = []; });
@@ -470,8 +693,13 @@
     function startNewRound() { db.activeRound = newRound(); db.view = 'setup-info'; saveDB(); render(); }
     function continueRound() { db.view = db.activeRound.wizardStep || 'scoring'; saveDB(); render(); }
     function abandonActiveRound() {
-        if (!confirm('Discard this in-progress round? This cannot be undone.')) return;
-        db.activeRound = null; db.view = 'home'; saveDB(); render();
+        showConfirm({
+            title: 'Discard Round?',
+            message: 'This in-progress round and every score in it will be thrown away. This cannot be undone.',
+            confirmText: 'Discard Round', danger: true
+        }, () => {
+            db.activeRound = null; db.view = 'home'; saveDB(); render();
+        });
     }
     function wizardNext(nextStep) { db.activeRound.wizardStep = nextStep; db.view = nextStep; saveDB(); render(); }
     function toggleSquadMember(id) {
@@ -480,7 +708,7 @@
         saveDB(); render();
     }
     function goToStandSetup() {
-        if (!activeRound().shooterIds.length) { alert('Pick at least one shooter.'); return; }
+        if (!activeRound().shooterIds.length) { showNotice('Pick a Squad', 'Choose at least one shooter before setting up stands.'); return; }
         wizardNext('setup-stands');
     }
     function addStand() { activeRound().stands.push({ id: newId(), slots: [] }); saveDB(); render(); }
@@ -605,9 +833,31 @@
         if (r.stands.length > n) r.stands = r.stands.slice(0, n);
         saveDB(); render();
     }
+    /* Draws the squad order. Without this the order was simply the order shooters were
+       ticked at setup - and since Paul's own profile is the main user and gets picked first
+       out of habit, he ended up first on stand 1 of every single shoot. Going first is a
+       genuine disadvantage on an unfamiliar stand: no chance to watch a bird first.
+
+       Fisher-Yates, and only drawn ONCE per round (guarded by `orderDrawn`), so re-entering
+       setup or navigating back doesn't silently reshuffle a squad that's already agreed its
+       order. The existing rotation logic then advances the lead shooter stand by stand from
+       whatever the draw produced, so everyone still takes a turn going first. */
+    function shuffleSquadOrder() {
+        const r = activeRound();
+        if (!r || r.shooterIds.length < 2) return;
+        const a = r.shooterIds;
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        r.orderDrawn = true;
+        saveDB(); render();
+    }
     function finishStandSetup() {
         const r = activeRound();
-        if (r.stands.length === 0) { alert('Add at least one stand before starting scoring.'); return; }
+        if (r.stands.length === 0) { showNotice('No Stands Yet', 'Set how many stands the course has before you start scoring.'); return; }
+        if (db.randomiseSquadOrder !== false && !r.orderDrawn && r.shooterIds.length > 1) shuffleSquadOrder();
+        r.orderDrawn = true;
         r.setupComplete = true; r.activeIdx = 0;
         wizardNext('scoring');
     }
@@ -707,22 +957,32 @@
         const r = db.history.find(x => x.id === roundId);
         if (!r) return;
         const label = `${r.ground || 'Unnamed Ground'} (${getUKDate(r.date)})`;
-        if (!confirm(`Delete the round at ${label}? Every shot from it is removed from your stats and analysis too. This cannot be undone.`)) return;
-        db.history = db.history.filter(x => x.id !== roundId);
-        if (db.historyRoundId === roundId) { db.historyRoundId = null; db.view = 'history'; }
-        saveDB(); render();
+        showConfirm({
+            title: 'Delete Round?',
+            message: `${label} — every shot from this round is removed from your stats and analysis too. This cannot be undone.`,
+            confirmText: 'Delete Round', danger: true
+        }, () => {
+            db.history = db.history.filter(x => x.id !== roundId);
+            if (db.historyRoundId === roundId) { db.historyRoundId = null; db.view = 'history'; }
+            saveDB(); render();
+        });
     }
     function finishRound() {
         const r = activeRound();
-        if (!confirm('Finish this round and save it to history? You can still review and export it afterwards.')) return;
-        r.finishedAt = Date.now();
-        db.history.push(r);
-        db.activeRound = null;
-        db.historyRoundId = r.id;
-        db.view = 'round-detail';
-        saveDB();
-        if (db.autoBackup !== false) autoBackupAfterRound();
-        render();
+        showConfirm({
+            title: 'Finish Round',
+            message: 'Saves this round to your history. You can still review, export and delete it afterwards.',
+            confirmText: 'Finish Round'
+        }, () => {
+            r.finishedAt = Date.now();
+            db.history.push(r);
+            db.activeRound = null;
+            db.historyRoundId = r.id;
+            db.view = 'round-detail';
+            saveDB();
+            if (db.autoBackup !== false) autoBackupAfterRound();
+            render();
+        });
     }
 
     /* =========================================================================================
@@ -780,6 +1040,90 @@
         document.getElementById('p-date').innerText = getUKDate(round.date);
         document.getElementById('p-notes').innerText = round.notes || '';
         generateExportGrid('p-grid', round);
+        // Both print views are `print-only`, so whichever isn't wanted must be emptied or
+        // they'd both appear on the page.
+        document.getElementById('analysis-print-view').innerHTML = '';
+        window.print();
+    };
+    /* ANALYTICS PDF EXPORT
+       Builds a plain, print-friendly report from the same analysis functions the on-screen
+       dashboard uses, so the two can't disagree. Deliberately text and tables only - no
+       Chart.js canvas, since canvases print unreliably and a table of dates is more useful
+       on paper anyway. Goes through window.print(), which on Android offers "Save as PDF",
+       matching how the scorecard export already works. */
+    function analyticsRows(groups, label) {
+        if (!groups.length) return '';
+        return `<h3 style="margin:10pt 0 3pt; font-size:10pt; text-transform:uppercase;">${label}</h3>
+            <table style="width:100%; border-collapse:collapse;">
+                ${groups.map(g => `<tr>
+                    <td style="text-align:left; padding:2pt 4pt; border:0.5pt solid #999;">${g.key}</td>
+                    <td style="width:60pt; padding:2pt 4pt; border:0.5pt solid #999;">${g.pct}%</td>
+                    <td style="width:70pt; padding:2pt 4pt; border:0.5pt solid #999; font-size:8pt;">${g.attempts} shots${g.ci ? ` (${g.ci.lo}-${g.ci.hi}%)` : ''}</td>
+                </tr>`).join('')}
+            </table>`;
+    }
+    window.exportAnalyticsPDF = () => {
+        document.getElementById('p-grid').innerHTML = '';
+        const shooterId = db.analysisShooterId;
+        const p = getProfile(shooterId);
+        if (!p) { showNotice('No Shooter Selected', 'Pick a shooter at the top of the Analysis screen first.'); return; }
+        const shots = getAllShots({ shooterId });
+        if (!shots.length) { showNotice('Nothing to Report Yet', 'This shooter has no tagged shots, so there is nothing to put in a report.'); return; }
+        const hits = shots.filter(s => s.result === 'hit1' || s.result === 'hit2').length;
+        const overall = Math.round(hits / shots.length * 100);
+        const byType = pctBy(shots, s => s.clayType);
+        const byPres = pctBy(shots, s => s.presentation);
+        const byDist = pctBy(shots.filter(s => s.distance && s.distance !== '(not set)'), s => s.distance);
+        const byChoke = pctBy(shots, s => s.choke);
+        const split = confidenceSplit([...byType, ...byPres, ...byDist], overall);
+        const patterns = missPatterns(shots, s => s.presentation);
+        const plan = buildPracticePlan(shots, shooterId);
+        const trend = trendByDate(shots);
+        const rolling = rollingAverage(shooterId, db.avgWindow);
+        const barrels = barrelSplit(shots);
+
+        document.getElementById('analysis-print-view').innerHTML = `
+            <div class="print-header">
+                <div><strong>SHOOTER:</strong> ${p.name}</div>
+                <div style="text-align:center; text-transform:uppercase;"><strong>Performance Report</strong></div>
+                <div style="text-align:right"><strong>DATE:</strong> ${new Date().toLocaleDateString('en-GB')}</div>
+            </div>
+            <table style="width:100%; border-collapse:collapse; margin-bottom:8pt;">
+                <tr>
+                    <td style="border:0.5pt solid #999; padding:4pt; text-align:center;"><strong style="font-size:14pt;">${shots.length}</strong><br><span style="font-size:7pt;">TARGETS</span></td>
+                    <td style="border:0.5pt solid #999; padding:4pt; text-align:center;"><strong style="font-size:14pt;">${overall}%</strong><br><span style="font-size:7pt;">ACCURACY</span></td>
+                    <td style="border:0.5pt solid #999; padding:4pt; text-align:center;"><strong style="font-size:14pt;">${rolling !== null ? rolling + '%' : '—'}</strong><br><span style="font-size:7pt;">LAST ${db.avgWindow} ROUNDS</span></td>
+                    <td style="border:0.5pt solid #999; padding:4pt; text-align:center;"><strong style="font-size:14pt;">${barrels.total ? barrels.pctFirst + '%' : '—'}</strong><br><span style="font-size:7pt;">1ST BARREL</span></td>
+                </tr>
+            </table>
+
+            <h3 style="margin:10pt 0 3pt; font-size:10pt; text-transform:uppercase;">What to work on next</h3>
+            ${plan.length ? plan.map(it => `<div style="border:0.5pt solid #999; padding:4pt; margin-bottom:3pt;">
+                    <strong>${it.priority}. ${it.title}</strong> — ${it.headline}${it.tier === 'early' ? ' [EARLY SIGNAL]' : ' [CONFIRMED]'}
+                    <div style="font-size:8pt;">${it.detail}</div>
+                    ${it.targetShots ? `<div style="font-size:8pt;"><em>Suggested: ${it.targetShots} targets</em></div>` : ''}
+                </div>`).join('')
+                : `<p style="font-size:9pt;">Not enough data yet to build a session from — around 50 tagged targets is usually where the first leads appear.</p>`}
+
+            ${split.firm.length ? `<h3 style="margin:10pt 0 3pt; font-size:10pt; text-transform:uppercase;">Confirmed differences vs your ${overall}% average</h3>
+                <ul style="font-size:9pt; margin:0 0 0 14pt;">${split.firm.map(g => `<li>${g.key} — ${g.pct}% (${g.direction === 'weak' ? 'below' : 'above'} average, ${g.attempts} shots)</li>`).join('')}</ul>` : ''}
+            ${split.early.length ? `<h3 style="margin:8pt 0 3pt; font-size:10pt; text-transform:uppercase;">Early signals (not yet confirmed)</h3>
+                <ul style="font-size:9pt; margin:0 0 0 14pt;">${split.early.map(g => `<li>${g.key} — ${g.pct}% (${g.attempts} shots, ~${g.needMore} more to confirm)</li>`).join('')}</ul>` : ''}
+
+            ${patterns.some(m => m.dominant) ? `<h3 style="margin:10pt 0 3pt; font-size:10pt; text-transform:uppercase;">Miss patterns</h3>
+                ${patterns.filter(m => m.dominant).map(m => `<div style="font-size:9pt; margin-bottom:2pt;"><strong>${m.key}:</strong> ${m.topReason} on ${m.topCount} of ${m.identified} identified misses (${m.share}%)${m.unsureCount ? ` plus ${m.unsureCount} unsure` : ''}. ${missReasonAdvice(m.topReason)}</div>`).join('')}
+                <p style="font-size:8pt;"><em>Readings are general coaching guidance, not a diagnosis — the same visible miss can have more than one cause.</em></p>` : ''}
+
+            ${analyticsRows(byPres, 'Hit % by presentation')}
+            ${analyticsRows(byDist, 'Hit % by distance')}
+            ${analyticsRows(byType, 'Hit % by clay type')}
+            ${byChoke.length > 1 ? analyticsRows(byChoke, 'Hit % by choke') : ''}
+
+            ${trend.length ? `<h3 style="margin:10pt 0 3pt; font-size:10pt; text-transform:uppercase;">Trend by date</h3>
+                <table style="width:100%; border-collapse:collapse;">
+                    ${trend.map(t => `<tr><td style="text-align:left; padding:2pt 4pt; border:0.5pt solid #999;">${getUKDate(t.date)}</td><td style="width:60pt; padding:2pt 4pt; border:0.5pt solid #999;">${t.pct}%</td><td style="width:70pt; padding:2pt 4pt; border:0.5pt solid #999; font-size:8pt;">${t.attempts} shots</td></tr>`).join('')}
+                </table>` : ''}
+            <p style="font-size:8pt; text-align:center; margin-top:14pt; color:#666;">Ranges in brackets are 95% confidence intervals — the wider the range, the less settled the number. Generated by Clayscore.</p>`;
         window.print();
     };
     window.shareAsImage = async (round) => {
@@ -958,6 +1302,14 @@
        3+ where one cause takes at least half is now reported, but `strength` distinguishes
        a solid pattern from an early one so the UI can say which it is rather than
        presenting both with equal authority. */
+    /* "Unsure" is a legitimate answer - you don't always know why you missed, and forcing a
+       guess would poison this whole analysis with invented causes. But it carries no
+       diagnostic information, so it must never be treated as a pattern: a stand where you
+       tagged 6 misses "Unsure" and 4 "Behind" should report *Behind, 4 of 4 identified*, not
+       "Unsure" as your dominant fault. Dominance is therefore computed over identified
+       misses only, while the unsure ones are still counted and shown for honesty about how
+       much of the picture is actually known. */
+    const NON_DIAGNOSTIC_MISS_REASONS = ['Unsure'];
     function missPatterns(shots, keyFn, minMisses = 3) {
         const misses = shots.filter(s => s.result === 'miss' && s.missReason);
         const groups = {};
@@ -966,15 +1318,25 @@
             const counts = {};
             arr.forEach(s => { counts[s.missReason] = (counts[s.missReason] || 0) + 1; });
             const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-            const topReason = sorted[0][0], topCount = sorted[0][1];
-            const share = Math.round(topCount / arr.length * 100);
-            const dominant = arr.length >= minMisses && share >= 50;
+            const identified = arr.filter(s => !NON_DIAGNOSTIC_MISS_REASONS.includes(s.missReason));
+            const unsureCount = arr.length - identified.length;
+            const idCounts = {};
+            identified.forEach(s => { idCounts[s.missReason] = (idCounts[s.missReason] || 0) + 1; });
+            const idSorted = Object.entries(idCounts).sort((a, b) => b[1] - a[1]);
+            const topReason = idSorted.length ? idSorted[0][0] : null;
+            const topCount = idSorted.length ? idSorted[0][1] : 0;
+            const share = identified.length ? Math.round(topCount / identified.length * 100) : 0;
+            const dominant = identified.length >= minMisses && share >= 50;
             return {
-                key, total: arr.length, topReason, topCount, share, counts: sorted,
-                lowSample: arr.length < minMisses,
+                key,
+                total: arr.length,            // every tagged miss, including unsure
+                identified: identified.length, // the ones with a usable cause
+                unsureCount,
+                topReason, topCount, share, counts: sorted,
+                lowSample: identified.length < minMisses,
                 dominant,
-                // A pattern off 6+ misses is worth acting on; 3-5 is a lead to watch.
-                strength: !dominant ? 'none' : (arr.length >= 6 ? 'firm' : 'early')
+                // A pattern off 6+ identified misses is worth acting on; 3-5 is a lead.
+                strength: !dominant ? 'none' : (identified.length >= 6 ? 'firm' : 'early')
             };
         }).sort((a, b) => (b.dominant - a.dominant) || (b.share - a.share) || (b.total - a.total));
     }
@@ -1173,6 +1535,35 @@
         const brutalStands = standRows.filter(s => s.theirPct <= 50 && s.myAtt >= 3).sort((a, b) => a.theirPct - b.theirPct).slice(0, 3);
         return { myPct, theirPct, diff: myPct - theirPct, myAtt, theirAtt, roundsCompared, presentations, brutalStands };
     }
+    /* PER-GROUND PERFORMANCE
+       "Hit % by Ground" already existed as a bar row, but that alone doesn't answer the
+       question Paul actually asked - how am I doing at each ground *over time*. This gives,
+       per ground: rounds shot, targets, overall hit %, best round, and the shooter's average
+       round score there, so a ground you consistently shoot badly stands out from one you had
+       a single bad day at. Sorted worst-first so problem grounds surface.
+
+       Rounds are counted from history only (not the in-progress round), since a half-finished
+       round would drag the average down misleadingly. */
+    function groundStats(shooterId) {
+        const groups = {};
+        db.history.forEach(r => {
+            if (!r.shooterIds.includes(shooterId)) return;
+            const att = shooterRoundAttempts(r, shooterId);
+            if (!att) return;
+            const key = (r.ground || '').trim() || '(no ground set)';
+            const g = groups[key] || (groups[key] = { key, rounds: 0, hits: 0, attempts: 0, best: null, roundPcts: [] });
+            const tot = shooterRoundTotal(r, shooterId);
+            const pct = Math.round(tot / att * 100);
+            g.rounds++; g.hits += tot; g.attempts += att; g.roundPcts.push(pct);
+            if (!g.best || pct > g.best.pct) g.best = { pct, total: tot, att, date: r.date, roundId: r.id };
+        });
+        return Object.values(groups).map(g => ({
+            ...g,
+            pct: g.attempts ? Math.round(g.hits / g.attempts * 100) : 0,
+            avgRound: g.roundPcts.length ? Math.round(g.roundPcts.reduce((a, b) => a + b, 0) / g.roundPcts.length) : 0,
+            ci: wilsonInterval(g.hits, g.attempts)
+        })).sort((a, b) => a.pct - b.pct);
+    }
     function bestRound(shooterId) {
         const rounds = db.history.filter(r => r.shooterIds.includes(shooterId));
         let best = null;
@@ -1209,7 +1600,7 @@
         // Give the download a moment to start before releasing the blob.
         setTimeout(() => URL.revokeObjectURL(url), 10000);
     }
-    function exportBackup() { writeBackupFile(backupFilename('sarge-backup')); }
+    function exportBackup() { writeBackupFile(backupFilename('clayscore-backup')); }
     /* AUTOMATIC BACKUP - runs on finishing a round, at most ONCE PER DAY.
        All the app's data lives in browser storage for this origin, so anything that clears
        site data destroys it. A file in Downloads sits outside browser storage entirely, so
@@ -1239,12 +1630,13 @@
     function autoBackupAfterRound() {
         try {
             if (alreadyBackedUpToday()) return;
-            writeBackupFile(backupFilename('sarge-auto'));
+            writeBackupFile(backupFilename('clayscore-auto'));
             db.lastAutoBackupAt = Date.now();
             saveDB();
         } catch (e) {}
     }
     function toggleAutoBackup() { db.autoBackup = (db.autoBackup === false); saveDB(); render(); }
+    function toggleRandomOrder() { db.randomiseSquadOrder = (db.randomiseSquadOrder === false); saveDB(); render(); }
     function triggerImport() { document.getElementById('import-file-input').click(); }
     function handleImportFile(file) {
         if (!file) return;
@@ -1252,20 +1644,30 @@
         reader.onload = (e) => {
             try {
                 const parsed = JSON.parse(e.target.result);
-                if (!parsed.profiles || !parsed.history) { alert('That file doesn\'t look like a Sarge backup.'); return; }
-                if (!confirm('This will REPLACE all current data (profiles, history, in-progress round) with the backup. Continue?')) return;
-                db = Object.assign(defaultDB(), parsed);
-                db.presets = Object.assign(defaultPresets(), db.presets || {});
-                saveDB(); render();
-                alert('Backup restored.');
-            } catch (err) { alert('Could not read that file - is it a valid Sarge backup JSON?'); }
+                if (!parsed.profiles || !parsed.history) { showNotice('Not a Clayscore Backup', "That file doesn't look like a Clayscore backup - check you picked the right one."); return; }
+                showConfirm({
+                    title: 'Restore Backup?',
+                    message: 'This REPLACES everything currently in the app - all profiles, all round history and any round in progress - with the contents of this backup.',
+                    confirmText: 'Replace All Data', danger: true
+                }, () => {
+                    db = Object.assign(defaultDB(), parsed);
+                    db.presets = Object.assign(defaultPresets(), db.presets || {});
+                    saveDB(); render();
+                    showNotice('Backup Restored', 'Your data has been replaced with the contents of the backup file.');
+                });
+            } catch (err) { showNotice('Could Not Read File', 'That file could not be read. Is it a valid Clayscore backup?'); }
         };
         reader.readAsText(file);
     }
     function resetAllData() {
-        if (!confirm('This wipes EVERYTHING — all profiles, all round history, all presets. This cannot be undone. Consider exporting a backup first. Continue?')) return;
-        localStorage.removeItem(DB_KEY);
-        location.reload();
+        showConfirm({
+            title: 'Erase Everything?',
+            message: 'This wipes every profile, every round in your history and all your presets. It cannot be undone — export a backup first if there is any doubt.',
+            confirmText: 'Erase All Data', danger: true
+        }, () => {
+            localStorage.removeItem(DB_KEY);
+            location.reload();
+        });
     }
 
     /* =========================================================================================
@@ -1303,12 +1705,17 @@
     function resetShooterStats(shooterId) {
         const p = getProfile(shooterId);
         const name = p ? p.name : 'this shooter';
-        if (!confirm(`Reset ALL recorded stats for ${name}? This clears every shot they've logged across every round in history (their totals will show as 0/0). Other shooters' data in those rounds is not affected. This cannot be undone.`)) return;
-        [...db.history, ...(db.activeRound ? [db.activeRound] : [])].forEach(r => {
-            if (r.hits && r.hits[shooterId]) delete r.hits[shooterId];
-            if (r.chokes && r.chokes[shooterId]) delete r.chokes[shooterId];
+        showConfirm({
+            title: 'Reset Shooter Stats?',
+            message: `Clears every shot ${name} has logged across every round in history — their totals will show as 0/0. Other shooters in those rounds are unaffected. This cannot be undone.`,
+            confirmText: 'Reset Stats', danger: true
+        }, () => {
+            [...db.history, ...(db.activeRound ? [db.activeRound] : [])].forEach(r => {
+                if (r.hits && r.hits[shooterId]) delete r.hits[shooterId];
+                if (r.chokes && r.chokes[shooterId]) delete r.chokes[shooterId];
+            });
+            saveDB(); render();
         });
-        saveDB(); render();
     }
     function goalProgress(shooterId, goal) {
         const shots = getAllShots({ shooterId });
@@ -1354,6 +1761,8 @@
     function render() {
         const hscroll = captureHScroll();
         document.body.classList.toggle('glove-mode', !!db.gloveMode);
+        document.body.classList.toggle('dark', !!db.darkMode);
+        applyThemeColor();
         renderHeaderActions();
         renderNav();
         const container = document.getElementById('app-container');
@@ -1418,6 +1827,7 @@
         if (db.view === 'scoring') {
             const r = activeRound();
             el.innerHTML = `
+                <button onclick="toggleDarkMode()" title="Dark mode" class="glove-header-btn p-2 rounded-lg border ${db.darkMode ? 'bg-orange-500 border-orange-500' : 'bg-slate-800 border-slate-700'}"><i data-lucide="${db.darkMode ? 'sun' : 'moon'}" class="w-4 h-4 ${db.darkMode ? 'text-white' : 'text-slate-400'}"></i></button>
                 <button onclick="toggleGloveMode()" title="Glove mode" class="glove-header-btn p-2 rounded-lg border ${db.gloveMode ? 'bg-orange-500 border-orange-500' : 'bg-slate-800 border-slate-700'}"><i data-lucide="hand" class="w-4 h-4 ${db.gloveMode ? 'text-white' : 'text-slate-400'}"></i></button>
                 <button onclick="undo()" id="undo-btn" class="${undoSnapshot ? '' : 'hidden'} text-[9px] font-black text-white uppercase flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700"><i data-lucide="rotate-ccw" size="10"></i></button>
                 <button onclick="toggleLock()" class="glove-header-btn bg-slate-800 p-2 rounded-lg border border-slate-700"><i data-lucide="${r.isLocked ? 'lock' : 'unlock'}" class="w-4 h-4 text-slate-400"></i></button>
@@ -1426,12 +1836,14 @@
         } else if (db.view === 'round-detail') {
             const round = db.history.find(r => r.id === db.historyRoundId);
             el.innerHTML = round ? `
+                <button onclick="toggleDarkMode()" title="Dark mode" class="glove-header-btn p-2 rounded-lg border ${db.darkMode ? 'bg-orange-500 border-orange-500' : 'bg-slate-800 border-slate-700'}"><i data-lucide="${db.darkMode ? 'sun' : 'moon'}" class="w-4 h-4 ${db.darkMode ? 'text-white' : 'text-slate-400'}"></i></button>
                 <button onclick="toggleGloveMode()" title="Glove mode" class="glove-header-btn p-2 rounded-lg border ${db.gloveMode ? 'bg-orange-500 border-orange-500' : 'bg-slate-800 border-slate-700'}"><i data-lucide="hand" class="w-4 h-4 ${db.gloveMode ? 'text-white' : 'text-slate-400'}"></i></button>
                 <button onclick="downloadCSV(round_ref())" class="bg-slate-700 text-white px-2 py-2 rounded-lg text-[9px] font-black uppercase">CSV</button>
                 <button onclick="shareAsImage(round_ref())" class="bg-slate-700 p-2 rounded-lg border border-slate-600"><i data-lucide="share-2" class="w-4 h-4 text-white"></i></button>
                 <button onclick="exportToPDF(round_ref())" class="bg-orange-500 px-3 py-2 rounded-lg text-[10px] font-black uppercase">PDF</button>` : '';
         } else {
             el.innerHTML = `
+                <button onclick="toggleDarkMode()" title="Dark mode" class="glove-header-btn p-2 rounded-lg border ${db.darkMode ? 'bg-orange-500 border-orange-500' : 'bg-slate-800 border-slate-700'}"><i data-lucide="${db.darkMode ? 'sun' : 'moon'}" class="w-4 h-4 ${db.darkMode ? 'text-white' : 'text-slate-400'}"></i></button>
                 <button onclick="toggleGloveMode()" title="Glove mode" class="glove-header-btn p-2 rounded-lg border ${db.gloveMode ? 'bg-orange-500 border-orange-500' : 'bg-slate-800 border-slate-700'}"><i data-lucide="hand" class="w-4 h-4 ${db.gloveMode ? 'text-white' : 'text-slate-400'}"></i></button>
                 <button onclick="goto('settings')" class="bg-slate-800 p-2 rounded-lg border border-slate-700"><i data-lucide="settings" class="w-4 h-4 text-slate-400"></i></button>`;
         }
@@ -1512,12 +1924,20 @@
                 <div class="space-y-2">
                     ${db.profiles.map(p => `
                         <div class="border ${p.isMainUser ? 'border-orange-300 bg-orange-50/40' : 'border-slate-200'} rounded-xl p-2.5">
+                            <!-- Two rows on purpose. These five controls were previously in a
+                                 single non-wrapping flex row, which on a phone squeezed the
+                                 delete button off the right-hand edge - so removing a guest
+                                 shooter looked impossible from this screen. Name gets its own
+                                 line; the details and an explicit labelled Remove button sit
+                                 underneath where they can't be clipped. -->
                             <div class="flex items-center gap-2">
-                                <button onclick="setMainUser('${p.id}')" title="Mark as me"><i data-lucide="star" size="16" class="${p.isMainUser ? 'text-orange-500' : 'text-slate-300'}" ${p.isMainUser ? 'fill="currentColor"' : ''}></i></button>
-                                <input type="text" value="${p.name}" onchange="updateProfile('${p.id}','name',this.value)" class="flex-1 bg-slate-50 rounded-lg p-2 text-xs font-black">
-                                <input type="text" value="${p.cpsa}" placeholder="CPSA #" onchange="updateProfile('${p.id}','cpsa',this.value)" class="w-20 bg-slate-50 rounded-lg p-2 text-[10px] font-bold">
-                                <select onchange="updateProfile('${p.id}','class',this.value)" class="bg-slate-50 rounded-lg p-2 text-[10px] font-black">${['AAA','AA','A','B','C','U'].map(c => `<option ${p.class === c ? 'selected' : ''}>${c}</option>`)}</select>
-                                <button onclick="deleteProfile('${p.id}')" class="text-red-400"><i data-lucide="trash-2" size="16"></i></button>
+                                <button onclick="setMainUser('${p.id}')" title="Mark as me" class="flex-shrink-0"><i data-lucide="star" size="16" class="${p.isMainUser ? 'text-orange-500' : 'text-slate-300'}" ${p.isMainUser ? 'fill="currentColor"' : ''}></i></button>
+                                <input type="text" value="${attrStr(p.name)}" onchange="updateProfile('${p.id}','name',this.value)" placeholder="Shooter name" class="flex-1 min-w-0 bg-slate-50 rounded-lg p-2 text-xs font-black">
+                            </div>
+                            <div class="flex items-center gap-2 mt-1.5">
+                                <input type="text" value="${attrStr(p.cpsa)}" placeholder="CPSA #" onchange="updateProfile('${p.id}','cpsa',this.value)" class="flex-1 min-w-0 bg-slate-50 rounded-lg p-2 text-[10px] font-bold">
+                                <select onchange="updateProfile('${p.id}','class',this.value)" class="bg-slate-50 rounded-lg p-2 text-[10px] font-black flex-shrink-0">${['AAA','AA','A','B','C','U'].map(c => `<option ${p.class === c ? 'selected' : ''}>${c}</option>`)}</select>
+                                <button onclick="deleteProfile('${p.id}')" class="flex-shrink-0 bg-red-50 border border-red-200 text-red-600 px-3 py-2 rounded-lg text-[9px] font-black uppercase flex items-center gap-1"><i data-lucide="trash-2" size="11"></i> Remove</button>
                             </div>
                             ${p.isMainUser ? renderArmoury(p) : ''}
                         </div>
@@ -1531,8 +1951,8 @@
                 <div class="text-[8px] font-black uppercase text-orange-500 mb-1">My CPSA Record</div>
                 <p class="text-[8px] text-slate-400 font-bold mb-1.5">Classification uses the Class field above. Copy your average/issue from your CPSA login — this app can't fetch it automatically (no server, and CPSA's averages page requires login).</p>
                 <div class="grid grid-cols-2 gap-1.5 mb-1.5">
-                    <input type="text" inputmode="decimal" value="${p.cpsaAverage || ''}" placeholder="Average % e.g. 78.5" oninput="updateCpsaRecord('${p.id}','cpsaAverage',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
-                    <input type="text" inputmode="numeric" value="${p.cpsaIssue || ''}" placeholder="Issue e.g. 82" oninput="updateCpsaRecord('${p.id}','cpsaIssue',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
+                    <input type="text" inputmode="decimal" value="${attrStr(p.cpsaAverage)}" placeholder="Average % e.g. 78.5" oninput="updateCpsaRecord('${p.id}','cpsaAverage',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
+                    <input type="text" inputmode="numeric" value="${attrStr(p.cpsaIssue)}" placeholder="Issue e.g. 82" oninput="updateCpsaRecord('${p.id}','cpsaIssue',this.value)" class="bg-white border border-slate-200 rounded-md p-1.5 text-[10px] font-bold">
                 </div>
                 ${p.cpsaUpdated ? `<div class="text-[7px] text-slate-400 font-bold mb-2">Last updated ${new Date(p.cpsaUpdated).toLocaleDateString('en-GB')}</div>` : ''}
                 <div class="text-[8px] font-black uppercase text-orange-500 mb-1 pt-1.5 border-t border-orange-100">My Cabinet</div>
@@ -1637,11 +2057,14 @@
                 <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">New Round — Details</h3>
                 <div class="grid grid-cols-2 gap-2">
                     <div class="col-span-2 space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Shoot Ground</label>
-                        <input type="text" value="${r.ground}" oninput="r_upd('ground',this.value)" onchange="maybeAutoFetchWeather()" placeholder="Ground name..." class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
+                        <input type="text" list="grounds-list" autocomplete="off" value="${attrStr(r.ground)}" oninput="r_upd('ground',this.value)" onchange="rememberGround(this.value); maybeAutoFetchWeather()" placeholder="Ground name..." class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold">
+                        <datalist id="grounds-list">${(db.grounds || []).map(g => `<option value="${attrStr(g)}"></option>`).join('')}</datalist>
+                        ${(db.grounds || []).length ? `<div class="flex flex-wrap gap-1 mt-1">${db.grounds.slice(0, 6).map(g => `<span onclick="pickGround('${jsStr(g)}')" class="chip ${groundKey(r.ground) === groundKey(g) ? 'active' : ''}">${g}</span>`).join('')}</div>` : ''}
+                    </div>
                     <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Date</label>
                         <input type="date" value="${r.date}" onchange="r_upd('date',this.value)" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
                     <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Event</label>
-                        <input type="text" value="${r.event}" oninput="r_upd('event',this.value)" placeholder="e.g. Club shoot" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
+                        <input type="text" value="${attrStr(r.event)}" oninput="r_upd('event',this.value)" placeholder="e.g. Club shoot" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"></div>
                     <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Wind</label>
                         <select onchange="r_upd_nested('conditions','wind',this.value)" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-bold"><option value="">—</option>${db.presets.windOptions.map(w => `<option ${r.conditions.wind === w ? 'selected' : ''}>${w}</option>`).join('')}</select></div>
                     <div class="space-y-1"><label class="text-[9px] font-black text-slate-400 uppercase">Light</label>
@@ -1670,6 +2093,44 @@
                 <p class="text-[9px] text-slate-400 font-bold mt-1">Choke is set per stand, not here — you'll pick it as you tag each stand.</p>
                 <button onclick="wizardNext('setup-squad')" class="w-full bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest mt-2">Next: Pick Squad →</button>
             </section>`;
+    }
+    /* SAVED GROUNDS
+       Ground names were free text, so "Mid Wales SG", "mid wales", and "Mid Wales S G" all
+       became different grounds in the analysis - which quietly wrecks per-ground stats,
+       because a ground's history gets split across near-duplicate spellings. Every name
+       typed is now remembered and offered back, so the spelling stays consistent.
+
+       Matching is case/whitespace-insensitive via groundKey() (already used by the weather
+       code for exactly the same reason), so re-typing an existing ground in a different case
+       reuses the stored spelling rather than adding a near-duplicate. */
+    function rememberGround(name) {
+        const trimmed = (name || '').trim();
+        if (!trimmed) return;
+        if (!Array.isArray(db.grounds)) db.grounds = [];
+        const existing = db.grounds.find(g => groundKey(g) === groundKey(trimmed));
+        if (!existing) {
+            db.grounds.push(trimmed);
+            db.grounds.sort((a, b) => a.localeCompare(b));
+        }
+        /* Always write the canonical spelling back onto the round - the stored one if this
+           ground is already known, otherwise the trimmed input. That's what keeps a ground's
+           history under a single name, and it makes this function correct on its own rather
+           than only when the input's oninput happens to have set the value first. */
+        const canonical = existing || trimmed;
+        const r = activeRound();
+        if (r && r.ground !== canonical) r.ground = canonical;
+        saveDB(); render();
+    }
+    function pickGround(name) {
+        const r = activeRound();
+        if (!r) return;
+        r.ground = name;
+        saveDB(); render();
+        maybeAutoFetchWeather();
+    }
+    function removeGround(name) {
+        db.grounds = (db.grounds || []).filter(g => g !== name);
+        saveDB(); render();
     }
     function r_upd_gun(id, name) { const r = activeRound(); r.equipment.gunId = id; r.equipment.gunName = id ? name : ''; saveDB(); }
     function r_upd(field, value) { activeRound()[field] = value; saveDB(); }
@@ -1720,6 +2181,34 @@
                 <div class="flex flex-wrap gap-1.5">
                     ${r.stands.map((s, i) => `<span class="chip active">Stand ${i + 1}</span>`).join('') || `<p class="text-[10px] text-slate-400 font-bold py-2">No stands yet — set a count above.</p>`}
                 </div>
+                ${r.shooterIds.length > 1 ? `
+                <div class="mt-3 pt-2 border-t border-slate-100">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Shooting Order</h3>
+                        <button onclick="shuffleSquadOrder()" class="text-[9px] bg-slate-900 text-white px-3 py-1.5 rounded-lg font-black uppercase flex items-center gap-1"><i data-lucide="shuffle" size="10"></i> Redraw</button>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5 mt-1.5">
+                        ${r.shooterIds.map((shId, i) => `<span class="chip active">${i + 1}. ${(getProfile(shId) || {}).name || 'Unknown'}</span>`).join('')}
+                    </div>
+                    <p class="text-[8px] text-slate-400 font-bold mt-1">${db.randomiseSquadOrder !== false ? 'Drawn at random when you start scoring, so you\'re not always first. Redraw or reorder by hand anytime.' : 'Random draw is off in Settings — this is the order you picked the squad in.'} The lead shooter then rotates on each stand.</p>
+                </div>` : ''}
+                ${r.shooterIds.length ? `
+                <div class="mt-3 pt-2 border-t border-slate-100">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Targets Per Stand</h3>
+                    <p class="text-[8px] text-slate-400 font-bold mb-2">Leave blank if everyone shoots the full card. Set a number for anyone shooting a shorter card — they'll only get that many targets per stand, and their score and percentages come out of their own total.</p>
+                    <div class="space-y-1.5">
+                        ${r.shooterIds.map(shId => {
+                            const p = getProfile(shId) || { name: 'Unknown' };
+                            const cap = (r.perStandLimit || {})[shId] || '';
+                            const implied = cap && r.stands.length ? cap * r.stands.length : null;
+                            return `<div class="flex items-center gap-2">
+                                <span class="text-[10px] font-black uppercase truncate flex-1">${p.name}</span>
+                                <input type="number" min="1" max="50" inputmode="numeric" value="${cap}" placeholder="All" onchange="setPerStandLimit('${shId}', this.value)" class="w-16 bg-slate-50 border border-slate-200 rounded-md p-1.5 text-[10px] font-bold text-center">
+                                <span class="text-[8px] font-bold text-slate-400 w-20">${implied ? `≈ ${implied} total` : 'full card'}</span>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>` : ''}
                 <div class="flex gap-2 mt-3">
                     <button onclick="wizardNext('setup-squad')" class="flex-1 bg-white border border-slate-300 py-3 rounded-xl text-xs font-black uppercase">← Back</button>
                     <button onclick="finishStandSetup()" class="flex-1 bg-orange-500 text-white py-3 rounded-xl text-xs font-black uppercase">Start Scoring →</button>
@@ -1798,12 +2287,60 @@
         st.slots.forEach(s => { bySlot[s.id] = letters[(s.defId || s.pairId) + '::' + s.birdIndex]; });
         return { defs, bySlot };
     }
+    /* PER-SHOOTER TARGET COUNT
+       Squad members routinely shoot different cards on the same day - 100, 80, 60. Paul's
+       description of how that works in practice: everyone walks the same stands, but some
+       shoot fewer targets at each one. So the limit is a per-shooter cap on targets per
+       stand; `null`/absent means "shoot everything", which is the default and the common case.
+
+       Implemented as a view-level slice rather than by deleting slots, because the slots
+       belong to the STAND (they describe the birds being thrown, which don't change per
+       shooter). Scoring, totals and analysis already only count targets with a recorded
+       result, so a shooter's percentages come out of their own card automatically. */
+    function shooterVisibleSlots(r, shId, st) {
+        const cap = r.perStandLimit && r.perStandLimit[shId];
+        const n = (cap && cap > 0) ? Math.min(cap, st.slots.length) : st.slots.length;
+        return st.slots.slice(0, n);
+    }
+    function setPerStandLimit(shId, value) {
+        const r = activeRound();
+        if (!r) return;
+        if (!r.perStandLimit) r.perStandLimit = {};
+        const n = parseInt(value);
+        if (!n || n <= 0) delete r.perStandLimit[shId];
+        else r.perStandLimit[shId] = n;
+        saveDB(); render();
+    }
+    /* Whose turn it is. Derived rather than stored: the first shooter in the round's
+       rotation order who still has an unmarked target on this stand. That makes the
+       highlight advance on its own as targets are marked, with no extra taps and nothing
+       to get out of sync. Returns null once everyone on the stand is done.
+
+       Note this only *suggests* - every row stays fully tappable, because squads do shoot
+       out of order and the app should never fight the actual shoot. */
+    function currentShooterOnStand(r, st, orderedIds) {
+        for (const shId of orderedIds) {
+            const byStand = r.hits[shId]?.[st.id] || {};
+            const mine = shooterVisibleSlots(r, shId, st);
+            if (mine.some(sl => !byStand[sl.id]?.result)) return shId;
+        }
+        return null;
+    }
     function viewScoring() {
         const r = activeRound();
         const st = r.stands[r.activeIdx];
         if (!st) return `<p class="text-center text-xs font-bold text-slate-400 py-8">No stands configured. <button onclick="addStand()" class="text-orange-500 underline">Add one</button></p>`;
         let sTotalShot = 0, sTotalPossible = 0;
-        r.stands.forEach(s => { sTotalPossible += s.slots.length * r.shooterIds.length; r.shooterIds.forEach(shId => { const byStand = r.hits[shId]?.[s.id] || {}; s.slots.forEach(sl => { if (byStand[sl.id]?.result) sTotalShot++; }); }); });
+        // Progress counts each shooter's OWN card, so a 60-target shooter in a 100-target
+        // squad doesn't make the round look permanently unfinished.
+        r.stands.forEach(s => {
+            r.shooterIds.forEach(shId => {
+                const mine = shooterVisibleSlots(r, shId, s);
+                sTotalPossible += mine.length;
+                const byStand = r.hits[shId]?.[s.id] || {};
+                mine.forEach(sl => { if (byStand[sl.id]?.result) sTotalShot++; });
+            });
+        });
         document.getElementById('progress-bar').style.width = sTotalPossible > 0 ? `${(sTotalShot / sTotalPossible) * 100}%` : '0%';
         const n = r.shooterIds.length;
         const leadIdx = n ? r.activeIdx % n : 0;
@@ -1813,41 +2350,51 @@
         standNav += `<button onclick="addStand()" class="glove-standnav flex-shrink-0 w-11 h-11 rounded-xl font-black text-xs border-2 border-dashed border-slate-300 text-slate-400">+</button>`;
 
         const legend = standTargetLegend(st);
+        const orderedIds = [];
+        for (let i = 0; i < n; i++) orderedIds.push(r.shooterIds[(i + leadIdx) % n]);
+        const currentShId = currentShooterOnStand(r, st, orderedIds);
         let rows = '';
         if (st.slots.length > 0) {
             for (let i = 0; i < n; i++) {
-                const shId = r.shooterIds[(i + leadIdx) % n];
+                const shId = orderedIds[i];
+                const isCurrent = shId === currentShId;
                 const p = getProfile(shId) || { name: 'Unknown' };
                 const byStand = r.hits[shId]?.[st.id] || {};
-                const count = st.slots.filter(sl => { const res = byStand[sl.id]?.result; return res === 'hit1' || res === 'hit2'; }).length;
+                const mySlots = shooterVisibleSlots(r, shId, st);
+                const count = mySlots.filter(sl => { const res = byStand[sl.id]?.result; return res === 'hit1' || res === 'hit2'; }).length;
+                const done = mySlots.every(sl => byStand[sl.id]?.result);
                 let targetsHtml = '';
-                st.slots.forEach((slot, si) => {
+                mySlots.forEach((slot, si) => {
                     const cell = byStand[slot.id] || { result: null, missReason: null };
                     targetsHtml += `
                         <div class="glove-target-card border border-slate-200 rounded-lg p-1.5 bg-slate-50 min-w-[104px] flex-1">
                             <div class="glove-target-label text-[10px] font-black uppercase text-slate-500 mb-1 text-center">${legend.bySlot[slot.id]}<span class="text-slate-300 ml-1">#${si + 1}</span></div>
                             <div class="flex gap-1">
-                                <button onclick="setHit('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 h-12 rounded-md font-black text-[12px] border ${(cell.result === 'hit1' || cell.result === 'hit2') ? 'hit-bg' : 'bg-white border-slate-300 text-slate-400'}">Hit</button>
-                                <button onclick="setMiss('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 h-12 rounded-md font-black text-[12px] border ${cell.result === 'miss' ? 'miss-bg' : 'bg-white border-slate-300 text-slate-400'}">Miss</button>
+                                <button onclick="setHit('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 min-w-0 h-12 rounded-md font-black text-[12px] border ${(cell.result === 'hit1' || cell.result === 'hit2') ? 'hit-bg' : 'bg-white border-slate-300 text-slate-400'}">Hit</button>
+                                <button onclick="setMiss('${shId}','${st.id}','${slot.id}')" class="glove-hitmiss-btn flex-1 min-w-0 h-12 rounded-md font-black text-[12px] border ${cell.result === 'miss' ? 'miss-bg' : 'bg-white border-slate-300 text-slate-400'}">Miss</button>
                             </div>
                             ${cell.result === 'miss' ? (
                                 (cell.missReason && r.expandedMissKey !== missKey(shId, slot.id))
                                 ? `<div class="mt-1.5"><span onclick="toggleMissReasonList('${shId}','${slot.id}')" class="glove-missreason-chip chip miss-active" style="display:block; text-align:center; font-size:9px; padding:7px 4px;">${cell.missReason} <span style="opacity:0.7;">✕</span></span></div>`
-                                : `<div class="flex flex-col gap-1 mt-1.5">${db.presets.missReasons.map(mr => `<span onclick="setMissReason('${shId}','${st.id}','${slot.id}','${mr}')" class="glove-missreason-chip chip ${cell.missReason === mr ? 'miss-active' : ''}" style="display:block; text-align:center; font-size:9px; padding:7px 4px;">${mr}</span>`).join('')}</div>`
+                                : `<div class="flex flex-col gap-1 mt-1.5">${db.presets.missReasons.map(mr => `<span onclick="setMissReason('${shId}','${st.id}','${slot.id}','${jsStr(mr)}')" class="glove-missreason-chip chip ${cell.missReason === mr ? 'miss-active' : ''}" style="display:block; text-align:center; font-size:9px; padding:7px 4px;">${mr}</span>`).join('')}</div>`
                             ) : ''}
                         </div>`;
                 });
                 const shooterChoke = getShooterChoke(r, shId, st.id);
                 rows += `
-                    <div class="p-2.5 space-y-1.5 ${i === 0 ? 'bg-orange-50/40 first-up-highlight' : ''} ${r.isLocked ? 'pointer-events-none opacity-60' : ''}">
+                    <div class="p-2.5 space-y-1.5 ${isCurrent ? 'shooter-current' : 'shooter-idle'} ${r.isLocked ? 'pointer-events-none opacity-60' : ''}">
                         <div class="flex justify-between items-center px-1">
-                            <div class="flex items-center gap-1.5"><span class="glove-shooter-name text-[11px] font-black uppercase truncate max-w-[110px] tracking-tight">${p.name}</span>${i === 0 ? '<span class="bg-orange-500 text-white text-[6px] px-1 rounded-full font-black uppercase">First Up</span>' : ''}</div>
+                            <div class="flex items-center gap-1.5">
+                                <span class="glove-shooter-name text-[11px] font-black uppercase truncate max-w-[110px] tracking-tight">${p.name}</span>
+                                ${isCurrent ? '<span class="bg-orange-500 text-white text-[7px] px-1.5 py-0.5 rounded-full font-black uppercase">Shooting Now</span>' : (done ? '<span class="text-green-600 text-[7px] font-black uppercase">Done</span>' : '')}
+                                ${r.perStandLimit && r.perStandLimit[shId] ? `<span class="text-[7px] font-black uppercase text-slate-400">${mySlots.length}/stand</span>` : ''}
+                            </div>
                             <div class="flex items-center gap-2">
                                 <select onchange="setShooterChoke('${shId}','${st.id}', this.value)" title="Choke" class="glove-choke-select text-[8px] font-bold bg-slate-50 border border-slate-200 rounded-md px-1 py-0.5 max-w-[74px] truncate">
                                     <option value="">Chk —</option>
                                     ${db.presets.chokes.map(c => `<option ${shooterChoke === c ? 'selected' : ''}>${c}</option>`).join('')}
                                 </select>
-                                <div class="glove-count text-base font-black italic text-slate-900">${count}<span class="text-slate-300 text-[8px] not-italic ml-0.5">/${st.slots.length}</span></div>
+                                <div class="glove-count text-base font-black italic text-slate-900">${count}<span class="text-slate-300 text-[8px] not-italic ml-0.5">/${mySlots.length}</span></div>
                             </div>
                         </div>
                         <div data-hscroll="targets-${shId}" class="flex gap-1.5 w-full overflow-x-auto pb-1 scrollbar-hide">${targetsHtml}</div>
@@ -2025,9 +2572,9 @@
                     <span class="text-[8px] font-black uppercase ${m.dominant ? 'text-orange-500' : 'text-slate-400'} flex-shrink-0">${m.total} miss${m.total === 1 ? '' : 'es'}</span>
                 </div>
                 ${m.dominant
-                    ? `<div class="text-[9px] font-black uppercase text-orange-600 mt-0.5">${m.topReason} — ${m.topCount} of ${m.total} (${m.share}%)${m.strength === 'early' ? ' <span class="text-[7px] bg-slate-200 text-slate-600 px-1 py-0.5 rounded">Early</span>' : ''}</div>
+                    ? `<div class="text-[9px] font-black uppercase text-orange-600 mt-0.5">${m.topReason} — ${m.topCount} of ${m.identified} identified${m.unsureCount ? ` <span class="text-slate-400">(+${m.unsureCount} unsure)</span>` : ''} (${m.share}%)${m.strength === 'early' ? ' <span class="text-[7px] bg-slate-200 text-slate-600 px-1 py-0.5 rounded">Early</span>' : ''}</div>
                        ${advice ? `<div class="text-[8px] font-bold text-slate-500 mt-0.5">${advice}${m.strength === 'early' ? ' Only a few misses behind this so far — watch it next time out before acting.' : ''}</div>` : ''}`
-                    : `<div class="text-[8px] font-bold text-slate-400 mt-0.5">${m.lowSample ? 'Not enough tagged misses yet to read anything into' : 'No single dominant cause — misses are spread'}</div>`}
+                    : `<div class="text-[8px] font-bold text-slate-400 mt-0.5">${m.lowSample ? (m.unsureCount === m.total && m.total > 0 ? 'All misses here tagged unsure — no cause to work with yet' : 'Not enough identified misses yet to read anything into') : 'No single dominant cause — misses are spread'}</div>`}
                 <div class="text-[8px] font-bold text-slate-400 mt-1">${breakdown}</div>
             </div>`;
     }
@@ -2044,6 +2591,7 @@
         const byChoke = pctBy(shots, s => s.choke);
         const overallPct = shots.length ? Math.round(shots.filter(s => s.result === 'hit1' || s.result === 'hit2').length / shots.length * 100) : 0;
         const confidence = confidenceSplit([...byType, ...byPres, ...byDistance], overallPct);
+        const grounds = groundStats(shooterId);
         const practicePlan = buildPracticePlan(shots, shooterId);
         const squad = squadComparison(shooterId);
         const missByPres = missPatterns(shots, s => s.presentation);
@@ -2073,6 +2621,7 @@
                 <select onchange="db.analysisShooterId=this.value; saveDB(); render();" class="w-full bg-slate-50 rounded-lg p-2 text-xs font-black mt-1">
                     ${db.profiles.map(pr => `<option value="${pr.id}" ${shooterId === pr.id ? 'selected' : ''}>${pr.isMainUser ? '★ ' : ''}${pr.name}${pr.isMainUser ? ' (Me)' : ''}</option>`)}
                 </select>
+                <button onclick="exportAnalyticsPDF()" class="w-full mt-2 bg-slate-900 text-white py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1"><i data-lucide="file-text" size="12"></i> Export Report as PDF</button>
                 <button onclick="resetShooterStats('${shooterId}')" class="w-full mt-2 bg-red-50 border border-red-200 text-red-600 py-2 rounded-xl text-[9px] font-black uppercase">Reset This Shooter's Stats</button>
             </section>
 
@@ -2214,6 +2763,22 @@
                 <p class="text-[8px] text-slate-400 font-bold pt-1 border-t border-slate-100">Two bars: <strong>confirmed</strong> means a 95% interval clear of your average — solid enough to act on. <strong>Early signal</strong> uses an 80% interval, so roughly one in five will turn out to be nothing — useful for direction early on, but don't rebuild your technique around one.</p>
             </section>
 
+            ${grounds.length ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">By Ground</h3>
+                <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">Worst first — separates a bad ground from a bad day</p>
+                ${grounds.map(g => `<div class="rounded-lg p-2 bg-slate-50 border border-slate-100">
+                    <div class="flex justify-between items-baseline gap-2">
+                        <span class="text-[10px] font-black uppercase truncate">${g.key}</span>
+                        <span class="text-[11px] font-black ${g.pct >= overallPct ? 'text-green-600' : 'text-red-500'} flex-shrink-0">${g.pct}%</span>
+                    </div>
+                    <div class="text-[8px] font-bold text-slate-400 mt-0.5">
+                        ${g.rounds} round${g.rounds === 1 ? '' : 's'} · ${g.attempts} targets · avg round ${g.avgRound}%${g.ci.half > 12 ? ` · could be ${g.ci.lo}-${g.ci.hi}%` : ''}
+                    </div>
+                    ${g.best ? `<div class="text-[8px] font-bold text-slate-500 mt-0.5">Best there: ${g.best.total}/${g.best.att} (${g.best.pct}%) on ${getUKDate(g.best.date)}</div>` : ''}
+                </div>`).join('')}
+                <p class="text-[8px] text-slate-400 font-bold pt-1 border-t border-slate-100">Completed rounds only. "Avg round" is the mean of your round percentages there, so one disaster doesn't hide behind a big total.</p>
+            </section>` : ''}
+
             ${squad ? `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 space-y-2">
                 <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">You vs Your Squad — Same Targets</h3>
                 <p class="text-[8px] text-slate-400 font-bold uppercase -mt-1">Only targets you and someone else both shot, so difficulty is matched</p>
@@ -2300,7 +2865,7 @@
         return `<section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
             <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">${title}</h3>
             <div class="flex flex-wrap gap-1.5 mb-2">
-                ${db.presets[listName].map(v => `<span class="chip active">${v} <i onclick="removePreset('${listName}','${v.replace(/'/g, "\\'")}')" data-lucide="x" size="10"></i></span>`).join('')}
+                ${db.presets[listName].map(v => `<span class="chip active">${v} <i onclick="removePreset('${listName}','${jsStr(v)}')" data-lucide="x" size="10"></i></span>`).join('')}
             </div>
             <div class="flex gap-1.5">
                 <input type="text" id="new-${listName}" placeholder="Add new..." class="flex-1 bg-slate-50 rounded-lg p-2 text-xs font-bold">
@@ -2316,6 +2881,37 @@
             ${presetEditor('Chokes', 'chokes')}
             ${presetEditor('Cartridges', 'cartridges')}
             ${presetEditor('Distance Bands', 'distanceBands')}
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Saved Grounds</h3>
+                <p class="text-[8px] text-slate-400 font-bold mb-2">Every ground you type is remembered and offered back at round setup, so the spelling stays consistent — otherwise "Mid Wales" and "mid wales SG" become two different grounds and split your stats.</p>
+                <div class="flex flex-wrap gap-1.5">
+                    ${(db.grounds || []).length
+                        ? db.grounds.map(g => `<span class="chip active">${g} <i onclick="removeGround('${jsStr(g)}')" data-lucide="x" size="10"></i></span>`).join('')
+                        : `<span class="text-[9px] text-slate-400 font-bold">None yet — they'll appear here as you enter them.</span>`}
+                </div>
+            </section>
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <div class="flex justify-between items-center">
+                    <div class="pr-3">
+                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Random Shooting Order</h3>
+                        <p class="text-[9px] text-slate-400 font-bold mt-1">Draws the squad order at random when a round starts, so you're not always first up. Turn off to keep the order you picked the squad in. You can redraw or reorder by hand at stand setup either way.</p>
+                    </div>
+                    <button onclick="toggleRandomOrder()" class="${db.randomiseSquadOrder !== false ? 'bg-orange-500' : 'bg-slate-200'} w-12 h-7 rounded-full relative flex-shrink-0">
+                        <span class="absolute top-0.5 ${db.randomiseSquadOrder !== false ? 'left-6' : 'left-0.5'} w-6 h-6 bg-white rounded-full shadow"></span>
+                    </button>
+                </div>
+            </section>
+            <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+                <div class="flex justify-between items-center">
+                    <div class="pr-3">
+                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400">Dark Mode</h3>
+                        <p class="text-[9px] text-slate-400 font-bold mt-1">Near-black background to save battery on OLED screens through a long day, and easier on the eyes in flat light. Also toggleable from the moon icon in the header.</p>
+                    </div>
+                    <button onclick="toggleDarkMode()" class="${db.darkMode ? 'bg-orange-500' : 'bg-slate-200'} w-12 h-7 rounded-full relative flex-shrink-0">
+                        <span class="absolute top-0.5 ${db.darkMode ? 'left-6' : 'left-0.5'} w-6 h-6 bg-white rounded-full shadow"></span>
+                    </button>
+                </div>
+            </section>
             <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
                 <div class="flex justify-between items-center">
                     <div class="pr-3">

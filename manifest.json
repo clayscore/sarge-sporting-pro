@@ -1,6 +1,6 @@
 {
-  "name": "Sarge Sporting Pro",
-  "short_name": "Sporting Pro",
+  "name": "Clayscore",
+  "short_name": "Clayscore",
   "description": "Score English Sporting Clays (CPSA) rounds, track shooter stats, and coach your weak spots.",
   "start_url": "./index.html",
   "scope": "./",
