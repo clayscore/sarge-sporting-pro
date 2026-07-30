@@ -6,7 +6,7 @@
 <title>Clayscore</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#12161d">
-<link rel="manifest" href="manifest2.json">
+<link rel="manifest" href="manifest.json">
 <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
 <style>
 /* =============================================================================
@@ -3447,7 +3447,7 @@ function boot(){
   if(db.view==='setup'&&!db.live)draft=null;
   render();
   if(db.view==='settings')storageInfo();
-  if('serviceWorker' in navigator){navigator.serviceWorker.register('sw2.js').catch(()=>{});}
+  if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 }
 if(typeof window!=='undefined'){window.onload=boot;}
 </script>
