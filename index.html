@@ -2782,7 +2782,7 @@ function association(tab){
      shared - somebody else, watching from beside you, in a round they scored */
 function provenance(sh){
   const out={total:0,tagged:0,unsure:0,unsureAuto:0,unsureChosen:0,
-    live:0,enrich:0,shared:0,delays:[]};
+    live:0,enrich:0,shared:0,v1:0,delays:[]};
   db.rounds.forEach(r=>r.stands.forEach(st=>st.slots.forEach(sl=>{
     const c=r.scores[sh]&&r.scores[sh][sl.id];
     if(!c||c.r!=='m')return;
@@ -2797,11 +2797,15 @@ function provenance(sh){
     out.tagged++;
     if(c.whySrc==='live')out.live++;
     else if(c.whySrc==='shared')out.shared++;
+    /* Imported from v1: the shooter's own diagnosis, but v1 did not record
+       whether it was made on the stand or edited afterwards, so it counts as
+       firsthand and is excluded from the recall figure rather than guessed at. */
+    else if(c.whySrc==='v1')out.v1++;
     else if(c.whySrc==='enrich'){out.enrich++;
       if(c.whyAt&&r.createdAt)out.delays.push((c.whyAt-r.createdAt)/86400000);}
   })));
-  out.known=out.live+out.enrich+out.shared;
-  out.firsthand=out.live+out.enrich;   // your own judgement, whenever it was made
+  out.known=out.live+out.enrich+out.shared+out.v1;
+  out.firsthand=out.live+out.enrich+out.v1;   // your own judgement, whenever it was made
   out.medianDelay=out.delays.length?out.delays.slice().sort((a,b)=>a-b)[Math.floor(out.delays.length/2)]:null;
   return out;
 }
@@ -2892,9 +2896,10 @@ function diagnosisConfidence(sh){
     else findings.push({good:false,t:'Much of it is second-hand',d:Math.round(sharedShare*100)+'% of your diagnoses ('+prov.shared+' of '+prov.known+') arrived in a squad code, which means whoever kept the book decided why you missed, watching from beside you. That is a legitimate opinion but it is not yours, and it tells you nothing about how well you read your own shooting.'});
   }
   // 3. recall - judged only on the diagnoses you actually made yourself
-  if(prov.firsthand>=8){
+  if(prov.firsthand>=8&&(prov.live+prov.enrich)>=8){
     weighted++;
-    const liveShare=prov.live/prov.firsthand;
+    const timed=prov.live+prov.enrich;
+    const liveShare=timed?prov.live/timed:0;
     if(liveShare>=0.6){score++;findings.push({good:true,t:'Diagnosed at the time',d:Math.round(liveShare*100)+'% of your own reasons were recorded on the stand rather than from memory afterwards.'});}
     else findings.push({good:false,t:'Mostly from memory',d:Math.round((1-liveShare)*100)+'% of your own reasons were added after the round'+(prov.medianDelay!=null&&prov.medianDelay>=1?', typically '+Math.round(prov.medianDelay)+' day(s) later':'')+'. Recall of a specific miss fades quickly, so these are the weakest entries you made yourself.'});
   }else if(prov.known>=8&&prov.firsthand<8){
@@ -3370,7 +3375,7 @@ function importBackup(file){
     try{
       const p=JSON.parse(fr.result);
       if(p&&p.v===2){db=Object.assign(blank(),p);save();render();notice('Imported',`${db.rounds.length} rounds restored.`);}
-      else if(p&&(p.history||p.shooters)){mergeV1(p);}
+      else if(p&&(p.history||p.profiles||p.shooters)){mergeV1(p);}
       else notice('Not recognised','That file is not a Clayscore backup.');
     }catch(e){notice('Could not read file','The file is not valid JSON.');}
   };
@@ -3385,39 +3390,174 @@ function importV1(){
 }
 /* v1 stored rounds under `history` with a different shape; map what maps cleanly
    and drop nothing silently - the notice reports exactly how much came across. */
+/* =============================================================================
+   IMPORTING FROM v1
+
+   Rewritten 30 July against a REAL v1 export. The first version was written
+   against a structure I assumed rather than one I had checked, and it was wrong
+   in three separate ways - so it silently imported nothing but ground names.
+   The actual v1 shape, for the record:
+
+     profiles[]                      <- NOT "shooters"
+     history[]
+       .shooterIds[]                 v1 profile ids
+       .stands[].slots[]             {clayType, presentation, distance, pairType…}
+       .hits[shooterId][standId][slotId] = {result, missReason}
+                                     <- scores live HERE, three levels deep,
+                                        not on the slot
+       result is "hit1" | "hit2" | "miss"
+                                     <- which barrel killed it, not "hit"
+
+   Everything below is mapped from that. Nothing is dropped silently: whatever
+   cannot be mapped is counted and reported.
+============================================================================= */
+var V1_PRES={'Crosser (L→R)':'Crosser L→R','Crosser (R→L)':'Crosser R→L',
+  'Incomer (L→R)':'Incomer L→R','Incomer (R→L)':'Incomer R→L',
+  'Outgoer (L→R)':'Outgoer L→R','Outgoer (R→L)':'Outgoer R→L',
+  'Looper (L→R)':'Looper L→R','Looper (R→L)':'Looper R→L',
+  'Rabbit (L→R)':'Rabbit L→R','Rabbit (R→L)':'Rabbit R→L',
+  'Springing Teal (L→R)':'Teal L→R','Springing Teal (R→L)':'Teal R→L',
+  'Quartering In (L→R)':'Quartering L→R','Quartering In (R→L)':'Quartering R→L',
+  'Quartering Away (L→R)':'Quartering L→R','Quartering Away (R→L)':'Quartering R→L'};
+/* Only the directional names map cleanly onto v2's list. A plain "Incomer" or
+   "Quartering Away" from before v1 had direction variants is kept exactly as it
+   was recorded - we genuinely do not know which way that bird was going, and
+   inventing a direction would be worse than an odd-looking label. */
+function v1Pres(x){ if(!x)return null; return V1_PRES[x]||x; }
+function v1Dist(x){ if(!x)return null; return x==='Medium'?'Mid':x; }
+
 function mergeV1(p){
-  const idFor={}; let added=0;
-  (p.shooters||[]).forEach(s=>{
-    const nm=(s.name||'').trim(); if(!nm)return;
+  const idFor={};
+  let added=0, dup=0, guests=0, targets=0, reasons=0, skippedCells=0;
+  const profiles=p.profiles||p.shooters||[];   // v1 uses profiles; tolerate either
+
+  function ensureShooter(v1id,fallbackName){
+    if(idFor[v1id])return idFor[v1id];
+    const prof=profiles.find(x=>x.id===v1id);
+    let nm=(prof&&prof.name||fallbackName||'').trim();
+    if(!nm){ guests++; nm='Unknown v1 shooter '+guests; }
     let ex=db.shooters.find(x=>x.name.toLowerCase()===nm.toLowerCase());
-    if(!ex){ex={id:newId(),name:nm,me:!db.shooters.length};db.shooters.push(ex);}
-    idFor[s.id]=ex.id;
-  });
+    if(!ex){ ex={id:newId(),name:nm,me:!db.shooters.length}; db.shooters.push(ex); }
+    idFor[v1id]=ex.id;
+    return ex.id;
+  }
+  profiles.forEach(pr=>{ if(pr&&pr.id)ensureShooter(pr.id); });
+
+  // kit, so the armoury and per-round gun survive the move
+  function ensureGun(name){
+    if(!name)return null;
+    let g=db.guns.find(x=>x.name.toLowerCase()===name.toLowerCase());
+    if(!g){ g=makeGun(name); db.guns.push(g); }
+    return g.id;
+  }
+  function ensureCart(name){
+    if(!name)return null;
+    let c=db.cartridges.find(x=>x.name.toLowerCase()===name.toLowerCase());
+    if(!c){ c=makeCart(name); db.cartridges.push(c); }
+    return c.id;
+  }
+
   (p.history||[]).forEach(h=>{
-    if(db.rounds.some(r=>r.legacyId&&r.legacyId===h.id))return;
-    const r=newRound(); r.legacyId=h.id;
-    r.date=(h.date||'').slice(0,10)||r.date; r.ground=h.ground||h.location||'';
-    r.shooterIds=(h.shooterIds||h.squad||[]).map(x=>idFor[x]||x).filter(Boolean);
+    if(db.rounds.some(x=>x.legacyId&&x.legacyId===h.id)){dup++;return;}
+    const r=newRound();
+    r.legacyId=h.id;
+    r.discipline='sporting';                       // v1 recorded ESP only
+    r.date=(h.date||'').slice(0,10)||r.date;
+    r.ground=h.ground||h.location||'';
+    r.createdAt=h.createdAt||r.createdAt;
+    const note=[h.event,h.notes].map(x=>(x||'').trim()).filter(Boolean).join(' — ');
+    if(note)r.note=note;
+
+    // squad: everyone named on the round OR carrying scores, so a shooter whose
+    // profile was later deleted still keeps their card
+    const v1Ids=[...new Set([].concat(h.shooterIds||[],Object.keys(h.hits||{})))];
+    r.shooterIds=v1Ids.map(x=>ensureShooter(x));
+
+    // stands and slots, remembering the v1 slot id so scores can be attached
+    const slotMap={};
     (h.stands||[]).forEach(st=>{
-      const slots=(st.slots||st.targets||[]).map(()=>({id:newId(),pres:null,dist:null}));
-      const ns={id:newId(),slots}; r.stands.push(ns);
-      (st.slots||st.targets||[]).forEach((sl,i)=>{
-        const sid=ns.slots[i].id;
-        Object.entries(sl.results||sl.scores||{}).forEach(([who,val])=>{
-          const nid=idFor[who]||who;
-          const res=val&&(val.result||val.r||val);
-          if(res!=='hit'&&res!=='miss'&&res!=='h'&&res!=='m')return;
-          cell(r,nid,sid,true).r=(res==='hit'||res==='h')?'h':'m';
-          const why=val&&(val.reason||val.why); if(why)r.scores[nid][sid].why=why;
+      const ns={id:newId(),cycle:2,birds:[],choke:null,slots:[]};
+      (st.slots||[]).forEach(sl=>{
+        const nsl={id:newId(),pres:v1Pres(sl.presentation),dist:v1Dist(sl.distance),
+          clayType:sl.clayType||null};
+        ns.slots.push(nsl);
+        slotMap[sl.id]=nsl.id;
+      });
+      if(ns.slots.length)r.stands.push(ns);
+    });
+
+    // THE SCORES: hits[shooterId][standId][slotId]
+    Object.entries(h.hits||{}).forEach(([v1sh,stands])=>{
+      const sh=ensureShooter(v1sh);
+      Object.values(stands||{}).forEach(cells=>{
+        Object.entries(cells||{}).forEach(([v1slot,val])=>{
+          const slotId=slotMap[v1slot];
+          const res=val&&val.result;
+          if(!slotId||!res){skippedCells++;return;}
+          if(res!=='hit1'&&res!=='hit2'&&res!=='miss'){skippedCells++;return;}
+          const c=cell(r,sh,slotId,true);
+          c.r=(res==='miss')?'m':'h';
+          if(res==='hit1')c.barrel=1;              // kept for DTL later; ESP scores 1 either way
+          else if(res==='hit2')c.barrel=2;
+          const why=val.missReason;
+          if(c.r==='m'&&why){
+            c.why=why; c.whyAuto=false; c.whySrc='v1';
+            if(why!=='Unsure')reasons++;      // "Unsure" is an answer, not a diagnosis
+          }else if(c.r==='m'){
+            c.why='Unsure'; c.whyAuto=true;        // never reviewed, same as a v2 default
+          }
+          targets++;
         });
       });
     });
-    r.limits={}; r.shooterIds.forEach(id=>r.limits[id]=roundStats(r,id).shot);
-    if(r.shooterIds.length&&r.stands.length){db.rounds.push(r);added++;}
+
+    // per-shooter limits: v1's own figure if it recorded one, else what they shot
+    r.limits={};
+    r.shooterIds.forEach((id,i)=>{
+      const v1id=v1Ids[i];
+      const lim=h.perStandLimit&&h.perStandLimit[v1id];
+      r.limits[id]=(typeof lim==='number'&&lim>0)?lim:roundStats(r,id).shot;
+    });
+
+    // conditions
+    const rd=(h.conditions&&h.conditions.readings)||[];
+    if(rd.length){
+      r.conditions={readings:rd.map(a=>({at:a.fetchedAt||r.createdAt,note:'Imported from v1',
+        temp:a.tempC==null?null:a.tempC, wind:a.windMph==null?null:a.windMph,
+        gust:a.gustMph==null?null:a.gustMph, dir:a.windDir==null?null:a.windDir,
+        cloud:a.cloudPct==null?null:a.cloudPct, precip:a.precipMm==null?null:a.precipMm,
+        windBand:windBand(a.windMph), lightBand:lightBand(a.cloudPct)}))};
+    }
+
+    // kit
+    const eq=h.equipment||{};
+    r.gunId=ensureGun(eq.gunName);
+    r.cartridgeId=ensureCart(eq.cartridge);
+    /* Do NOT add these to gun wear: v1 kept its own shot counts, and counting
+       them again here would inflate the cleaning interval. Correct by hand in
+       the Armoury if you want the historic figure. */
+    r.countedShots=true;
+
     if(r.ground&&!db.grounds.some(g=>gkey(g)===gkey(r.ground)))db.grounds.push(r.ground);
+    if(r.stands.length&&r.shooterIds.length){db.rounds.push(r);added++;}
   });
+
+  // ground coordinates, so a re-visit needs no GPS prompt
+  Object.entries(p.groundLocations||{}).forEach(([k,v])=>{
+    if(v&&v.lat!=null&&v.lon!=null&&!db.groundLocations[k])db.groundLocations[k]=v;
+  });
+
   save();render();
-  notice('Import complete',`${added} round${added===1?'':'s'} and ${Object.keys(idFor).length} shooter${Object.keys(idFor).length===1?'':'s'} brought across from v1. Nothing in v1 was changed or deleted.`);
+  const bits=[];
+  bits.push(added+' round'+(added===1?'':'s'));
+  bits.push(targets+' target'+(targets===1?'':'s'));
+  bits.push(Object.keys(idFor).length+' shooter'+(Object.keys(idFor).length===1?'':'s'));
+  let msg=bits.join(', ')+' imported. '+reasons+' diagnosed miss'+(reasons===1?'':'es')+' came with them.';
+  if(guests)msg+=' '+guests+' shooter'+(guests===1?' had no':'s had no')+' profile left in v1 and came in as "Unknown v1 shooter" — rename them under Settings → Shooters.';
+  if(dup)msg+=' '+dup+' round'+(dup===1?' was':'s were')+' already here and skipped.';
+  if(skippedCells)msg+=' '+skippedCells+' cell'+(skippedCells===1?'':'s')+' could not be read and were left out.';
+  msg+=' Nothing in v1 was changed or deleted.';
+  notice('Import complete',msg);
 }
 async function storageInfo(){
   const el=document.getElementById('storage'); if(!el)return;
