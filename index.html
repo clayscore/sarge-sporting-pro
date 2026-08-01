@@ -190,7 +190,11 @@ nav svg{width:19px;height:19px}
   <div class="sheet" id="sheet"></div>
 </div>
 <div id="sharecard"></div>
-<input type="file" id="importer" accept="application/json" style="display:none" onchange="importBackup(this.files[0])">
+<!-- NO accept filter on purpose. Android commonly reports a .json file as
+     application/octet-stream or with no type at all, so accept="application/json"
+     greys the file out in the picker and it cannot be chosen. Filtering here
+     buys nothing - the file is validated when it is read. -->
+<input type="file" id="importer" style="display:none" onchange="importBackup(this.files[0])">
 
 <script>
 /* =============================================================================
@@ -1065,7 +1069,8 @@ function vHome(){
     <input class="field" id="firstname" placeholder="Your name" style="margin-bottom:10px">
     <button class="btn clay" onclick="firstRun()">Get started</button>
     <div class="divider"></div>
-    <button class="btn ghost sm" style="width:100%" onclick="document.getElementById('importer').click()">Import a Clayscore backup</button>
+    <button class="btn ghost sm" style="width:100%;margin-bottom:6px" onclick="document.getElementById('importer').click()">Import a Clayscore backup</button>
+    <button class="btn ghost sm" style="width:100%" onclick="pasteBackupSheet()">Paste one instead</button>
   </div>`;
 
   const car=careerPct(s.id), total=allShots(s.id).length;
@@ -2637,8 +2642,12 @@ function vSettings(){
     <button class="btn ${db.autoBackup?'clay':'ghost'}" style="margin-bottom:8px" onclick="db.autoBackup=!db.autoBackup;save();render()">Auto-backup: ${db.autoBackup?'on':'off'}</button>
     <p class="tiny" style="margin-bottom:10px">Saves a backup to your Downloads the first time you finish a round each day — one file per shooting day, not one per round. To be straight with you: a web page is not allowed to overwrite an existing download, and Android gives no way to ask, so this cannot keep a single rolling file. Take a manual export before you ever wipe or reset the phone.${db.lastBackupDay?' Last automatic backup: '+esc(db.lastBackupDay)+'.':''}</p>
     <button class="btn ghost" style="margin-bottom:8px" onclick="exportBackup()">Export backup</button>
-    <button class="btn ghost" style="margin-bottom:8px" onclick="document.getElementById('importer').click()">Import backup</button>
-    <button class="btn ghost" style="margin-bottom:8px" onclick="importV1()">Import from Clayscore v1 on this device</button>
+    <div class="divider"></div>
+    <button class="btn clay" style="margin-bottom:6px" onclick="importV1()">Bring my v1 rounds across</button>
+    <p class="tiny" style="margin-bottom:10px">Reads v1's data straight out of this browser — <b>no file needed</b>. This is the one to use if v1 was on this phone at the same web address. Nothing in v1 is changed or deleted.</p>
+    <button class="btn ghost" style="margin-bottom:6px" onclick="document.getElementById('importer').click()">Import a backup file</button>
+    <button class="btn ghost" style="margin-bottom:8px" onclick="pasteBackupSheet()">Paste a backup instead</button>
+    <p class="tiny" style="margin-bottom:10px">Use paste if the picker will not let you select the file — Android often refuses .json files because of how it labels them.</p>
     <div id="storage" class="tiny"></div>
   </div>
 
@@ -3371,15 +3380,41 @@ function autoBackup(){
 function importBackup(file){
   if(!file)return;
   const fr=new FileReader();
-  fr.onload=()=>{
-    try{
-      const p=JSON.parse(fr.result);
-      if(p&&p.v===2){db=Object.assign(blank(),p);save();render();notice('Imported',`${db.rounds.length} rounds restored.`);}
-      else if(p&&(p.history||p.profiles||p.shooters)){mergeV1(p);}
-      else notice('Not recognised','That file is not a Clayscore backup.');
-    }catch(e){notice('Could not read file','The file is not valid JSON.');}
-  };
+  fr.onload=()=>applyBackupText(fr.result,file.name);
+  fr.onerror=()=>notice('Could not read that file','The phone would not hand the file over. Try "Paste a backup instead" and paste the contents.');
   fr.readAsText(file);
+}
+/* One path for a backup however it arrived - picked, or pasted when the picker
+   will not cooperate. Reports what it found rather than failing silently. */
+function applyBackupText(text,label){
+  let p;
+  try{ p=JSON.parse(text); }
+  catch(e){
+    notice('Not valid JSON',(label?'"'+label+'" ':'That ')+'could not be read as JSON. If you pasted it, make sure you copied the whole file including the first { and the last }.');
+    return;
+  }
+  if(p&&p.v===2){
+    db=Object.assign(blank(),p); save(); render();
+    notice('Imported',db.rounds.length+' round'+(db.rounds.length===1?'':'s')+' restored from a Clayscore v2 backup.');
+    return;
+  }
+  if(p&&(p.history||p.profiles||p.shooters)){ mergeV1(p); return; }
+  notice('Not a Clayscore backup','That file parsed as JSON but has none of the things a Clayscore backup has — no rounds, no profiles, no history. Keys found: '+
+    Object.keys(p||{}).slice(0,8).join(', ')+'.');
+}
+function pasteBackupSheet(){
+  sheet(`<h3>Paste a backup</h3>
+    <p class="muted" style="margin:8px 0 10px">If the file picker will not let you choose the file — Android often blocks .json — open the backup in a text or file app, select all, copy, and paste it here instead.</p>
+    <textarea class="field" id="pastebk" rows="6" placeholder="{ &quot;profiles&quot;: [ ..." style="font-size:11px;font-family:ui-monospace,monospace"></textarea>
+    <button class="btn clay" style="margin:10px 0 8px" onclick="doPasteBackup()">Import</button>
+    <button class="btn ghost" onclick="closeSheet()">Cancel</button>`);
+}
+function doPasteBackup(){
+  const el=document.getElementById('pastebk');
+  const t=el?el.value.trim():'';
+  closeSheet();
+  if(!t){notice('Nothing pasted','The box was empty.');return;}
+  applyBackupText(t,'pasted text');
 }
 function importV1(){
   try{
