@@ -224,6 +224,7 @@ function blank(){return{
   seenTrophies:[],
   lastDiscipline:'sporting',
   ssPick:null,
+  goals:[],
   groundLocations:{},       // ground key -> {lat,lon} so a re-visit needs no GPS prompt
   autoBackup:true,
   lastBackupDay:null,
@@ -241,9 +242,11 @@ function load(){
 }
 function saveRound(r){ r.updatedAt=Date.now(); save(); }
 
-const me=()=>db.shooters.find(s=>s.me)||db.shooters[0];
-const shooter=id=>db.shooters.find(s=>s.id===id)||{name:'Unknown'};
-const gkey=s=>(s||'').trim().toLowerCase();
+/* Function declarations, not const arrows: these are the helpers tests need to
+   reach, and a const at script top level is not a window property. */
+function me(){return db.shooters.find(s=>s.me)||db.shooters[0];}
+function shooter(id){return db.shooters.find(s=>s.id===id)||{name:'Unknown'};}
+function gkey(s){return (s||'').trim().toLowerCase();}
 
 /* ---------- round helpers ---------- */
 function newRound(){return{
@@ -294,11 +297,24 @@ function targetsForBird(st,idx){
 /* Distance is a BAND, not a number. Nobody eyeballs 37 yards accurately, and a
    false precision would poison the analysis. Three honest buckets instead. */
 var BANDS=['Close','Mid','Long'];
+/* Clay types, as v1 had them. A midi behaves nothing like a battue, so this is
+   a genuine analytical dimension, not decoration. */
+var CLAY_TYPES=['Standard','Midi','Mini','Battue','Rabbit','Flash','Teal'];
 var BAND_HINT={Close:'under about 25 yards',Mid:'roughly 25 to 40 yards',Long:'beyond about 40 yards'};
 function distFor(st,i){
   const b=(st.birds||[])[birdIdx(st,i)];
   if(b&&b.dist)return b.dist;
   return st.slots[i]?.dist||null;
+}
+function clayFor(st,i){
+  const b=(st.birds||[])[birdIdx(st,i)];
+  if(b&&b.clay)return b.clay;
+  return st.slots[i]?.clayType||null;
+}
+function setBirdClay(st,idx,c){
+  if(!Array.isArray(st.birds))st.birds=[];
+  while(st.birds.length<standCycle(st))st.birds.push({pres:null,dist:null,clay:null});
+  st.birds[idx]=Object.assign({pres:null,dist:null,clay:null},st.birds[idx],{clay:c||null});
 }
 function setBirdDist(st,idx,d){
   if(!Array.isArray(st.birds))st.birds=[];
@@ -891,7 +907,7 @@ function allShots(sh){
       srStand:(isSkeet(r)||isABT(r))?(st.station||null)
         :isSuperSporting(r)?(st.index+1)
         :isMenuFormat(r)?((st.index%cageCount(r))+1):null,
-      pres:presFor(st,i),dist:distFor(st,i),
+      pres:presFor(st,i),dist:distFor(st,i),clay:clayFor(st,i),
       wind:roundBand(r,'windBand'),light:roundBand(r,'lightBand'),
       choke:st.choke||null,
       gun:r.gunId?gunLabel(gunById(r.gunId)):null,
@@ -1037,6 +1053,7 @@ function render(){
   document.getElementById('btn-glove').classList.toggle('on',!!db.glove);
   document.getElementById('btn-dark').classList.toggle('on',!!db.dark);
   const m=document.getElementById('main');
+  keepScrolls();          // the scoreboard is the one thing that scrolls sideways
   const v={home:vHome,setup:vSetup,capture:vCapture,enrich:vEnrich,analysis:vAnalysis,
     settings:vSettings,check:vCheck}[db.view]||vHome;
   m.innerHTML=v();
@@ -1046,6 +1063,8 @@ function render(){
     const on=db.view===k||(k==='setup'&&db.view==='capture');
     return `<button class="${on?'on':''}" onclick="go('${k}')">${svgi(i)}<span>${l}</span></button>`;
   }).join('');
+  restoreScrolls();
+  if(typeof requestAnimationFrame==='function')requestAnimationFrame(restoreScrolls);
   if(db.view==='settings'&&typeof storageInfo==='function')storageInfo();
 }
 function go(v){
@@ -1569,6 +1588,7 @@ function vCapture(){
       ${c?esc(c)+' · re-check':'Conditions not recorded · tap to fetch'}</button>`})()}
   </div>
 
+  ${renderScoreboard(r)}
   ${isSuperSporting(r)?ssPanel(r,st)
     :isABT(r)?abtPanel(r,st,slot,sh)
     :isSkeet(r)?skeetPanel(r,st,slot,sh)
@@ -1802,6 +1822,11 @@ function birdPanel(st,slotIndex){
         <option value="">Not recorded</option>
         ${PRESENTATIONS.map(p=>`<option ${birds[editing]&&birds[editing].pres===p?'selected':''}>${esc(p)}</option>`).join('')}
       </select>
+      <label class="lbl" style="margin-top:12px">Clay</label>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:4px">
+        ${CLAY_TYPES.map(c=>`<button class="chip ${((st.birds||[])[editing]||{}).clay===c?'clay':''}" style="padding:10px 11px"
+          onclick="chooseClay(${editing},'${c}')">${c}</button>`).join('')}
+      </div>
       <label class="lbl" style="margin-top:12px">Distance</label>
       <div class="row">
         ${BANDS.map(b=>`<button class="btn ${((st.birds||[])[editing]||{}).dist===b?'clay':'ghost'} sm" style="flex:1"
@@ -1816,14 +1841,23 @@ function editBird(i){const st=db.live.stands[db.live.activeStand];st.editBird=i;
 function chooseBird(i,v){
   const r=db.live,st=r.stands[r.activeStand];
   const keepDist=((st.birds||[])[i]||{}).dist||null;
-  setBird(st,i,v); setBirdDist(st,i,keepDist);
+  const keepClay=((st.birds||[])[i]||{}).clay||null;
+  setBird(st,i,v); setBirdDist(st,i,keepDist); setBirdClay(st,i,keepClay);
   if(st.editBird!=null)st.editBird=null;
+  saveRound(r);render();
+}
+function chooseClay(i,c){
+  const r=db.live,st=r.stands[r.activeStand];
+  const cur=((st.birds||[])[i]||{}).clay||null;
+  setBirdClay(st,i,cur===c?null:c);   // tapping the active one clears it
   saveRound(r);render();
 }
 function chooseDist(i,d){
   const r=db.live,st=r.stands[r.activeStand];
   const cur=((st.birds||[])[i]||{}).dist||null;
+  const keepClay2=((st.birds||[])[i]||{}).clay||null;
   setBirdDist(st,i,cur===d?null:d);   // tapping the active band clears it
+  setBirdClay(st,i,keepClay2);
   saveRound(r);render();
 }
 function cycleSheet(){
@@ -2084,7 +2118,8 @@ function vRoundDone(){
       return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--rule)">
         <b style="font-size:14px">${esc(shooter(id).name)}</b><span class="mono" style="font-weight:900">${s.hit}/${s.shot} · ${s.pct}%</span></div>`}).join('')}
     <button class="btn clay" style="margin-top:16px" onclick="finishRound()">Save round</button>
-  </div>`;
+  </div>
+  ${renderScoreboard(r,{title:'Final standings',final:true})}`;
 }
 function finishRound(){
   const r=db.live; r.editMiss=null;
@@ -2325,6 +2360,95 @@ function barRow(label,o,base){
   </div>`;
 }
 /* =============================================================================
+   RUNNING SCOREBOARD
+
+   Restored from v1. The squad wants to see where everyone is without waiting for
+   the end, and — because v2 randomises the draw — WHO SHOOTS WHEN. The order
+   chips answer that; the grid answers the rest.
+
+   It is the one place in v2 that scrolls sideways, so its scroll position is
+   preserved across re-renders. v1 had exactly this bug: every tap reset the
+   table to the left and you lost your place.
+============================================================================= */
+var _hscroll={};
+function keepScrolls(){
+  document.querySelectorAll('[data-hscroll]').forEach(el=>{
+    _hscroll[el.getAttribute('data-hscroll')]=el.scrollLeft;
+  });
+}
+function restoreScrolls(){
+  document.querySelectorAll('[data-hscroll]').forEach(el=>{
+    const v=_hscroll[el.getAttribute('data-hscroll')];
+    if(v)el.scrollLeft=v;
+  });
+}
+function standScore(r,sh,st){
+  let hit=0,shot=0;
+  st.slots.forEach(sl=>{
+    const c=r.scores[sh]&&r.scores[sh][sl.id];
+    if(c&&c.r){shot++;if(c.r==='h')hit++;}
+  });
+  return{hit,shot};
+}
+function renderScoreboard(r,opts){
+  const o=opts||{};
+  const ids=r.shooterIds;
+  if(!ids.length)return '';
+  const totals={};
+  ids.forEach(id=>totals[id]=roundStats(r,id));
+  const ranked=[...ids].sort((a,b)=>totals[b].hit-totals[a].hit);
+  const rankOf={}; ranked.forEach((id,i)=>rankOf[id]=i+1);
+  // stands worth showing: any with targets, or the one in progress
+  const stands=r.stands.map((st,i)=>({st,i}))
+    .filter(x=>x.st.slots.length&&(!isSkeet(r)||x.st.station!==null));
+  return `<div class="card" style="margin-top:12px">
+    <h2 class="stencil">${o.title||'Scoreboard'}</h2>
+
+    ${ids.length>1?`<div class="lbl" style="margin-bottom:6px">Shooting order</div>
+      <div class="who" style="margin-bottom:10px">
+        ${ids.map((id,i)=>`<button class="chip ${id===r.activeShooter&&!o.final?'clay':''}"
+          onclick="pickShooter('${id}')">
+          <span style="opacity:.6">${i+1}</span> ${esc(shooter(id).name)}</button>`).join('')}
+      </div>`:''}
+
+    <div data-hscroll="scoreboard" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table style="border-collapse:collapse;font-size:11px;width:100%;min-width:${90+ids.length*54}px">
+        <thead><tr>
+          <th style="text-align:left;padding:5px 4px;font-size:9px;letter-spacing:.1em;color:var(--muted);position:sticky;left:0;background:var(--paper)">STAND</th>
+          ${ids.map(id=>`<th style="padding:5px 2px;text-align:center;min-width:50px">
+            <div style="font-size:10px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(shooter(id).name)}</div>
+            <div class="tiny" style="font-weight:700">${rankOf[id]===1?'&#9733;':'#'+rankOf[id]}</div>
+          </th>`).join('')}
+        </tr></thead>
+        <tbody>
+          ${stands.map(({st,i})=>{
+            const cur=!o.final&&i===r.activeStand;
+            const label=isSkeet(r)?('ST '+st.station):isMenuFormat(r)?('ST '+((st.index%cageCount(r))+1)):('ST '+(i+1));
+            const size=st.slots.length;
+            return `<tr style="${cur?'background:rgba(232,98,29,.10)':''}">
+              <td style="padding:5px 4px;border-bottom:1px solid var(--rule);position:sticky;left:0;background:${cur?'#fbeee6':'var(--paper)'}">
+                <div style="font-weight:900;font-size:10px">${label}</div>
+                <div class="tiny" style="white-space:nowrap">${size} clay${size===1?'':'s'}${size%2===0?' · '+(size/2)+'pr':''}</div>
+              </td>
+              ${ids.map(id=>{const c=standScore(r,id,st);
+                return `<td style="padding:5px 2px;text-align:center;border-bottom:1px solid var(--rule);border-left:1px solid var(--rule);font-weight:900;
+                  color:${!c.shot?'var(--faint)':c.hit===c.shot?'var(--hit)':c.hit===0?'var(--miss)':'var(--text)'}">
+                  ${c.shot?c.hit+'<span style="font-weight:600;opacity:.5">/'+c.shot+'</span>':'·'}</td>`}).join('')}
+            </tr>`}).join('')}
+        </tbody>
+        <tfoot><tr style="background:var(--ink);color:#fff">
+          <td style="padding:7px 4px;font-size:9px;letter-spacing:.1em;font-weight:900;position:sticky;left:0;background:var(--ink)">TOTAL</td>
+          ${ids.map(id=>`<td style="padding:7px 2px;text-align:center;font-weight:900;font-size:13px">
+            ${totals[id].hit}<span style="font-weight:600;opacity:.55;font-size:10px">/${totals[id].shot}</span></td>`).join('')}
+        </tr></tfoot>
+      </table>
+    </div>
+    ${ids.length>1?`<div class="tiny" style="margin-top:6px">★ marks the leader. A dot means that stand has not been shot yet. Tap a name above to switch shooter.</div>`
+      :`<div class="tiny" style="margin-top:6px">A dot means that stand has not been shot yet.</div>`}
+  </div>`;
+}
+
+/* =============================================================================
    ANALYSIS VISUALS
 
    Hand-built SVG, no chart library. Three rules throughout:
@@ -2334,6 +2458,137 @@ function barRow(label,o,base){
    - every visual has a one-line reading of what it shows, because a picture
      nobody can interpret is decoration
 ============================================================================= */
+
+/* =============================================================================
+   GOALS — restored from v1
+
+   A target you set yourself, measured against real shooting. Deliberately
+   honest: progress is only reported once there are enough targets behind it to
+   mean anything, and a goal that is met is said to be met rather than quietly
+   left at 99%.
+============================================================================= */
+var GOAL_METRICS=[
+  {k:'overall',label:'Overall average',pick:false},
+  {k:'presentation',label:'A presentation',pick:'pres'},
+  {k:'distance',label:'A distance band',pick:'dist'},
+  {k:'clay',label:'A clay type',pick:'clay'},
+  {k:'ground',label:'A ground',pick:'ground'}
+];
+function goalOptions(sh,kind){
+  const shots=allShots(sh);
+  if(kind==='pres')return [...new Set(shots.map(x=>x.pres).filter(Boolean))];
+  if(kind==='dist')return BANDS;
+  if(kind==='clay')return CLAY_TYPES;
+  if(kind==='ground')return [...new Set(shots.map(x=>x.ground).filter(g=>g&&g!=='—'))];
+  return [];
+}
+function goalProgress(sh,g){
+  const shots=allShots(sh).filter(x=>{
+    if(g.metric==='overall')return true;
+    if(g.metric==='presentation')return x.pres===g.value;
+    if(g.metric==='distance')return x.dist===g.value;
+    if(g.metric==='clay')return x.clay===g.value;
+    if(g.metric==='ground')return x.ground===g.value;
+    return false;
+  });
+  const n=shots.length;
+  const hit=shots.filter(x=>x.res==='h').length;
+  const pct=n?hit/n:0;
+  const ci=wilson(hit,n);
+  return{n,hit,pct,ci,
+    enough:n>=MIN_N*2,
+    met:n>=MIN_N*2&&ci.lo>=g.target/100,      // met only when the interval clears it
+    close:n>=MIN_N*2&&pct>=g.target/100};
+}
+function addGoal(){
+  const s=me(); if(!s)return;
+  if(!Array.isArray(db.goals))db.goals=[];
+  db.goals.push({id:newId(),shooter:s.id,metric:'overall',value:null,target:75,createdAt:Date.now()});
+  save();render();
+}
+function updateGoal(id,field,v){
+  const g=(db.goals||[]).find(x=>x.id===id); if(!g)return;
+  if(field==='target')v=Math.max(1,Math.min(100,parseInt(v,10)||0));
+  if(field==='metric'){g.value=null;}
+  g[field]=v; save();render();
+}
+function removeGoal(id){db.goals=(db.goals||[]).filter(x=>x.id!==id);save();render();}
+function renderGoals(sh){
+  const list=(db.goals||[]).filter(g=>g.shooter===sh);
+  if(!list.length)return `<div class="muted">No goals set. A goal is a percentage you are aiming at on something specific — a presentation, a distance, a ground, or your overall average.</div>
+    <button class="btn ghost" style="margin-top:10px" onclick="addGoal()">Set a goal</button>`;
+  return list.map(g=>{
+    const p=goalProgress(sh,g);
+    const m=GOAL_METRICS.find(x=>x.k===g.metric)||GOAL_METRICS[0];
+    const opts=m.pick?goalOptions(sh,m.pick):[];
+    const label=g.metric==='overall'?'Overall average':(g.value||'— choose —');
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--rule)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+        <div style="font-weight:900;font-size:13px">${esc(label)}</div>
+        <div class="mono" style="font-weight:900;color:${p.met?'var(--hit)':p.enough?'var(--clay)':'var(--faint)'}">
+          ${p.enough?Math.round(p.pct*100)+'%':'—'} <span style="font-weight:600;color:var(--muted)">/ ${g.target}%</span></div>
+      </div>
+      <div class="bar" style="margin-bottom:4px;position:relative">
+        <i style="width:${Math.round(Math.min(1,p.pct)*100)}%;background:${p.met?'var(--hit)':'var(--clay)'}"></i>
+        <span style="position:absolute;top:-3px;bottom:-3px;left:${g.target}%;width:2px;background:var(--ink)"></span>
+      </div>
+      <div class="tiny" style="margin-bottom:6px">${
+        !p.enough?'Only '+p.n+' target'+(p.n===1?'':'s')+' so far — needs '+(MIN_N*2)+' before this means anything.'
+        :p.met?'<b style="color:var(--hit)">Met.</b> '+p.hit+'/'+p.n+', and the plausible range clears your target.'
+        :p.close?'At '+Math.round(p.pct*100)+'% over '+p.n+' targets — above the line, but not yet beyond doubt ('+Math.round(p.ci.lo*100)+'–'+Math.round(p.ci.hi*100)+'%).'
+        :Math.round((g.target/100-p.pct)*p.n*10)/10+' more targets needed at this volume to reach '+g.target+'%.'}</div>
+      <div class="row">
+        <select class="field" style="flex:1;font-size:11px" onchange="updateGoal('${g.id}','metric',this.value)">
+          ${GOAL_METRICS.map(x=>`<option value="${x.k}" ${g.metric===x.k?'selected':''}>${esc(x.label)}</option>`).join('')}
+        </select>
+        ${m.pick?`<select class="field" style="flex:1;font-size:11px" onchange="updateGoal('${g.id}','value',this.value)">
+          <option value="">— choose —</option>
+          ${opts.map(o=>`<option ${g.value===o?'selected':''}>${esc(o)}</option>`).join('')}
+        </select>`:''}
+        <input class="field" style="width:64px;text-align:center" type="number" inputmode="numeric"
+          value="${g.target}" onchange="updateGoal('${g.id}','target',this.value)">
+        <button class="btn ghost sm" style="color:var(--miss)" onclick="removeGoal('${g.id}')">✕</button>
+      </div>
+    </div>`;
+  }).join('')+`<button class="btn ghost" style="margin-top:10px" onclick="addGoal()">Add another goal</button>`;
+}
+
+/* ---------- miss map ----------
+   Restored from v1. Where the shot went relative to the bird, as a picture. Four
+   directions read instantly in a way four bars never will; the reasons that have
+   no direction (mount, lost it, unsure) are listed beside rather than forced
+   onto the diagram. */
+function renderMissMap(shots){
+  const tagged=shots.filter(x=>x.res==='m'&&x.why);
+  if(tagged.length<6)return '';
+  const n=w=>tagged.filter(x=>x.why===w).length;
+  const dirs=[
+    {k:'Above',   n:n('Above'),   cx:100,cy:26 },
+    {k:'Below',   n:n('Below'),   cx:100,cy:134},
+    {k:'Behind',  n:n('Behind'),  cx:30, cy:80 },
+    {k:'In front',n:n('In front'),cx:170,cy:80 }
+  ];
+  const dirTotal=dirs.reduce((a,d)=>a+d.n,0);
+  if(!dirTotal)return '';
+  const max=Math.max(...dirs.map(d=>d.n));
+  const other=['Didn\'t mount','Lost it','Unsure'].map(k=>({k,n:n(k)})).filter(x=>x.n);
+  const top=dirs.slice().sort((a,b)=>b.n-a.n)[0];
+  return `<svg viewBox="0 0 200 160" style="width:100%;max-width:280px;height:150px;display:block;margin:0 auto">
+    <line x1="100" y1="44" x2="100" y2="116" stroke="var(--rule)" stroke-width="1.5"/>
+    <line x1="48" y1="80" x2="152" y2="80" stroke="var(--rule)" stroke-width="1.5"/>
+    <ellipse cx="100" cy="80" rx="17" ry="7" fill="var(--clay)" opacity=".85"/>
+    <circle cx="100" cy="80" r="3" fill="var(--paper)"/>
+    ${dirs.map(d=>{
+      if(!d.n)return `<text x="${d.cx}" y="${d.cy+4}" text-anchor="middle" font-size="9" fill="var(--faint)" font-weight="700">${d.k} 0</text>`;
+      const rr=9+ (d.n/max)*16;
+      return `<circle cx="${d.cx}" cy="${d.cy}" r="${rr.toFixed(1)}" fill="var(--miss)" opacity="${(0.20+0.6*d.n/max).toFixed(2)}"/>
+        <text x="${d.cx}" y="${d.cy+4}" text-anchor="middle" font-size="11" font-weight="900" fill="var(--miss)">${d.n}</text>
+        <text x="${d.cx}" y="${d.cy+rr+11}" text-anchor="middle" font-size="8" font-weight="800" fill="var(--muted)">${d.k.toUpperCase()}</text>`;
+    }).join('')}
+  </svg>
+  <div class="muted" style="margin-top:6px">Of ${dirTotal} misses you placed in a direction, most went <b>${esc(top.k.toLowerCase())}</b> (${top.n}). Circle size is how often.</div>
+  ${other.length?`<div class="tiny" style="margin-top:4px">Not shown on the diagram, because they have no direction: ${esc(other.map(o=>o.k+' '+o.n).join(' · '))}.</div>`:''}`;
+}
 
 /* ---------- form over time ----------
    A line of round scores with a rolling average through it, so a run of good
@@ -2576,6 +2831,8 @@ function vAnalysis(){
 
   if(whys.length){
     const dom=whys[0][1]/tagged.length;
+    const mm=renderMissMap(shots);
+    if(mm)out+=`<div class="card"><h2 class="stencil">Miss map</h2>${mm}</div>`;
     out+=`<div class="card"><h2 class="stencil">Why you miss</h2>
       ${whys.map(([w,n])=>`<div style="margin-bottom:9px">
         <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:800;margin-bottom:4px">
@@ -2637,6 +2894,11 @@ function vAnalysis(){
     if(byPres.length)out+=`<div class="card"><h2 class="stencil">By presentation</h2>
       ${byPres.map(p=>barRow(p.k,p,car/100)).join('')}</div>`;
 
+    const byClay=breakdown(shots,x=>x.clay);
+    if(byClay.length)out+=`<div class="card"><h2 class="stencil">By clay type</h2>
+      ${byClay.map(c=>barRow(c.k,c,car/100)).join('')}
+      <div class="tiny">A midi or a battue behaves nothing like a standard, so this is worth separating out.</div></div>`;
+
     const byDist=breakdown(shots,x=>x.dist).sort((a,b)=>BANDS.indexOf(a.k)-BANDS.indexOf(b.k));
     if(byDist.length)out+=`<div class="card"><h2 class="stencil">By distance</h2>
       ${byDist.map(d=>barRow(d.k+' — '+BAND_HINT[d.k],d,car/100)).join('')}</div>`;
@@ -2693,6 +2955,8 @@ function vAnalysis(){
       ${lastCheck?`<div class="tiny" style="margin-top:10px">Last checked ${new Date(lastCheck.check.at).toLocaleDateString()}${lastCheck.check.by?' by '+esc(lastCheck.check.by):''}.</div>`:''}
     </div>`;
   }
+
+  if((db.goals||[]).some(g=>g.shooter===s.id))out+=`<div class="card"><h2 class="stencil">Goals</h2>${renderGoals(s.id)}</div>`;
 
   if(riv.length)out+=`<div class="card"><h2 class="stencil">Head to head</h2>
     ${riv.map(v=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--rule)">
@@ -2861,6 +3125,27 @@ function vSettings(){
       <button class="btn sm" onclick="addCart()">Add</button></div>
   </div>`:''}
 
+  <div class="card"><h2 class="stencil">Goals</h2>
+    ${renderGoals(s?s.id:'')}
+  </div>
+
+  ${s?`<div class="card"><h2 class="stencil">My CPSA record</h2>
+    <p class="muted" style="margin-bottom:10px">Kept here for reference only. <b>The app cannot fetch these</b> — CPSA's averages need a login and Clayscore has no server — so copy them across yourself when they change.</p>
+    <div class="grid2" style="margin-bottom:8px">
+      <div><label class="lbl">Membership no.</label>
+        <input class="field" value="${esc((s.cpsa||{}).membership||'')}" onchange="setCpsa('${s.id}','membership',this.value)"></div>
+      <div><label class="lbl">Classification</label>
+        <input class="field" value="${esc((s.cpsa||{}).classification||'')}" placeholder="AA / A / B / C" onchange="setCpsa('${s.id}','classification',this.value)"></div>
+    </div>
+    <div class="grid2">
+      <div><label class="lbl">CPSA average</label>
+        <input class="field" inputmode="decimal" value="${esc((s.cpsa||{}).average||'')}" onchange="setCpsa('${s.id}','average',this.value)"></div>
+      <div><label class="lbl">Discipline</label>
+        <input class="field" value="${esc((s.cpsa||{}).discipline||'')}" placeholder="ESP" onchange="setCpsa('${s.id}','discipline',this.value)"></div>
+    </div>
+    ${(s.cpsa||{}).updated?`<div class="tiny" style="margin-top:8px">Last updated ${new Date(s.cpsa.updated).toLocaleDateString()}. Your Clayscore average over all rounds is ${careerPct(s.id)}% — the two will differ, since CPSA counts registered shoots only.</div>`:''}
+  </div>`:''}
+
   <div class="card"><h2 class="stencil">Squad sharing</h2>
     <p class="muted" style="margin-bottom:10px">Rounds travel between phones as a short text code — send it in the squad chat and everyone's stats stay in step. No accounts, no server, and it works with no signal at the ground.</p>
     <button class="btn ghost" onclick="importSheet()">Paste a squad code</button>
@@ -2896,11 +3181,25 @@ function vSettings(){
       </div>`}).join(''):'<div class="muted">No saved rounds yet.</div>'}
   </div>
 
+  <div class="card" style="border-color:var(--miss)">
+    <h2 class="stencil" style="color:var(--miss)">Erase everything</h2>
+    <p class="muted" style="margin-bottom:10px">Deletes every round, shooter, ground, gun and goal on this device. There is no undo and no copy anywhere else — Clayscore has no server. <b>Export a backup first.</b></p>
+    <button class="btn ghost" style="margin-bottom:8px" onclick="exportBackup()">Export a backup now</button>
+    <button class="btn ghost" style="color:var(--miss);border-color:var(--miss)" onclick="eraseAllPrompt()">Erase all data</button>
+  </div>
+
   <div class="tiny" style="text-align:center;padding:6px 0 10px">Clayscore v2 · works fully offline</div>`;
 }
 function renameShooter(id,v){const s=db.shooters.find(x=>x.id===id);if(s){s.name=(v||'').trim()||s.name;save();render();}}
 function setMe(id){db.shooters.forEach(s=>s.me=s.id===id);save();render();}
 function removeShooter(id){db.shooters=db.shooters.filter(s=>s.id!==id);save();render();}
+function setCpsa(id,field,v){
+  const sh=db.shooters.find(x=>x.id===id); if(!sh)return;
+  if(!sh.cpsa)sh.cpsa={};
+  sh.cpsa[field]=(v||'').trim()||null;
+  sh.cpsa.updated=Date.now();
+  save();render();
+}
 function quickAdd(){const el=document.getElementById('setname');const n=(el.value||'').trim();if(!n)return;
   db.shooters.push({id:newId(),name:n,me:!db.shooters.length});save();render();}
 function delRound(id){db.rounds=db.rounds.filter(r=>r.id!==id);save();render();}
@@ -3592,6 +3891,22 @@ function downloadReport(){
   a.download='clayscore-report-'+new Date().toISOString().slice(0,10)+'.html';a.click();
 }
 
+function eraseAllPrompt(){
+  const n=db.rounds.length, t=db.shooters.length;
+  confirmSheet('Erase everything?',
+    n+' round'+(n===1?'':'s')+' and '+t+' shooter'+(t===1?'':'s')+' will be deleted from this device permanently. If you have not exported a backup, close this and do that first.',
+    'Erase it all',eraseAll);
+}
+function eraseAll(){
+  /* The fields are `dark` and `glove`, not darkMode/gloveMode - an earlier
+     version of this function preserved names that do not exist, which silently
+     reset the theme on erase. */
+  const keep={dark:db.dark,glove:db.glove,mode:db.mode,autoBackup:db.autoBackup};
+  db=blank();
+  Object.assign(db,keep);          // display and safety preferences survive
+  save();render();
+  notice('Erased','Everything has been deleted. Your display settings were kept.');
+}
 function exportBackup(){
   const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
