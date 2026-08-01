@@ -877,6 +877,8 @@ function allShots(sh){
     const c=r.scores[sh]?.[sl.id];
     if(!c||!c.r)return;
     out.push({round:r.id,date:r.date,ground:r.ground||'—',stand:si+1,
+      seq:0,ofRound:0,   // filled in below: position through the round
+      standOf:r.stands.length,
       res:c.r,why:c.why,
       discipline:r.discipline||'sporting',
       trap:isMenuFormat(r)?(sl.trap||null):null,
@@ -895,6 +897,13 @@ function allShots(sh){
       gun:r.gunId?gunLabel(gunById(r.gunId)):null,
       cart:r.cartridgeId?cartLabel(cartById(r.cartridgeId)):null});
   })));
+  /* Position through the round, for the fatigue curve. Slots are stored in the
+     order they were shot, so the running index is the shooting order. */
+  const byRound={};
+  out.forEach(x=>(byRound[x.round]=byRound[x.round]||[]).push(x));
+  Object.values(byRound).forEach(list=>{
+    list.forEach((x,i)=>{x.seq=i;x.ofRound=list.length;});
+  });
   return out;
 }
 function careerPct(sh){const a=allShots(sh);return a.length?Math.round(a.filter(s=>s.res==='h').length/a.length*100):0;}
@@ -2288,7 +2297,7 @@ function saveCheck(){
    trustworthy is worse than no number, because you'd go and practise the wrong
    thing on the back of it.
 ============================================================================= */
-const MIN_N=6;
+var MIN_N=6;   // var, not const, so tests can assert against the real threshold
 function wilson(hit,n,z=1.96){
   if(!n)return{lo:0,hi:1,p:0};
   const p=hit/n,d=1+z*z/n,c=p+z*z/(2*n),m=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n));
@@ -2315,6 +2324,192 @@ function barRow(label,o,base){
     ${solid?'':`<div class="tiny" style="margin-top:2px">Only ${o.n} shot${o.n>1?'s':''} — not enough to draw a conclusion yet.</div>`}
   </div>`;
 }
+/* =============================================================================
+   ANALYSIS VISUALS
+
+   Hand-built SVG, no chart library. Three rules throughout:
+   - never draw a cell or a point that has no data behind it; leave it blank and
+     say so, rather than implying zero
+   - colour carries meaning (against YOUR average, not an absolute scale)
+   - every visual has a one-line reading of what it shows, because a picture
+     nobody can interpret is decoration
+============================================================================= */
+
+/* ---------- form over time ----------
+   A line of round scores with a rolling average through it, so a run of good
+   days is distinguishable from a genuine trend. */
+function roundHistory(sh){
+  return db.rounds.filter(r=>roundStats(r,sh).shot>0)
+    .sort((a,b)=>a.createdAt-b.createdAt)
+    .map(r=>({date:r.date,ground:r.ground||'—',...roundStats(r,sh),discipline:r.discipline||'sporting'}));
+}
+function renderForm(hist,career){
+  if(hist.length<2)return '';
+  const W=320,H=110,P=6;
+  const n=hist.length;
+  const lo=Math.max(0,Math.min(career,...hist.map(h=>h.pct))-8);
+  const hi=Math.min(100,Math.max(career,...hist.map(h=>h.pct))+8);
+  const x=i=>P+(n===1?W/2:i*(W-2*P)/(n-1));
+  const y=v=>H-P-((v-lo)/Math.max(1,hi-lo))*(H-2*P);
+  // rolling average of 3, so the eye follows the trend rather than the noise
+  const roll=hist.map((_,i)=>{
+    const from=Math.max(0,i-2), slice=hist.slice(from,i+1);
+    return slice.reduce((a,b)=>a+b.pct,0)/slice.length;
+  });
+  const path=hist.map((h,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(h.pct).toFixed(1)).join(' ');
+  const rollPath=roll.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ');
+  const last=hist[n-1], prev=roll[n-1]-roll[Math.max(0,n-4)];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block">
+    <line x1="${P}" y1="${y(career)}" x2="${W-P}" y2="${y(career)}"
+      stroke="var(--faint)" stroke-width="1" stroke-dasharray="4 3"/>
+    <path d="${rollPath}" fill="none" stroke="var(--clay)" stroke-width="6" stroke-opacity=".22"
+      stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${path}" fill="none" stroke="var(--ink)" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"/>
+    ${hist.map((h,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(h.pct).toFixed(1)}" r="${i===n-1?4.5:2.5}"
+      fill="${h.pct>=career?'var(--hit)':'var(--miss)'}"/>`).join('')}
+  </svg>
+  <div class="tiny" style="display:flex;justify-content:space-between;margin-top:2px">
+    <span>${esc(hist[0].date)}</span>
+    <span>Dashed line = career average · thick line = 3-round rolling</span>
+    <span>${esc(last.date)}</span>
+  </div>
+  <div class="muted" style="margin-top:8px">Last round <b>${last.hit}/${last.shot} (${last.pct}%)</b> at ${esc(last.ground)}. ${
+    n>=4? (Math.abs(prev)<2?'Your rolling average is flat over the last few rounds.'
+      :prev>0?'Your rolling average is up '+Math.round(prev)+' points over the last few rounds.'
+      :'Your rolling average is down '+Math.round(-prev)+' points over the last few rounds.')
+    :'Too few rounds yet to call a trend.'}</div>`;
+}
+
+/* ---------- where the targets are going ----------
+   Hit percentage tells you where you are weak. It does not tell you where the
+   TARGETS are, because a 40% category you meet twice a round costs you less
+   than a 65% one you meet twenty times. This ranks by targets on the table:
+   how many more you would have hit if that category matched your own average.
+   It is the honest answer to "what should I work on first". */
+function lossLeaders(shots,career){
+  const dims=[['Presentation',x=>x.pres],['Distance',x=>x.dist],
+    ['Ground',x=>x.ground==='—'?null:x.ground],['Wind',x=>x.wind],['Light',x=>x.light],
+    ['Trap',x=>x.standTrap||(x.trap?'Trap '+x.trap:null)],['Target type',x=>x.element]];
+  const out=[];
+  dims.forEach(([label,fn])=>{
+    breakdown(shots,fn).forEach(g=>{
+      if(g.n<MIN_N)return;
+      const gap=career-g.p;
+      if(gap<=0)return;
+      out.push({label:label,key:g.k,n:g.n,pct:g.p,onTable:g.n*gap,lo:g.lo,hi:g.hi,
+        firm:g.hi<career});
+    });
+  });
+  return out.sort((a,b)=>b.onTable-a.onTable).slice(0,6);
+}
+function renderLossLeaders(list,career){
+  if(!list.length)return '';
+  const max=list[0].onTable;
+  return list.map(l=>`<div style="margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">
+      <span style="font-size:12px;font-weight:800">${esc(l.key)}<span class="tiny" style="font-weight:600"> · ${esc(l.label.toLowerCase())}</span></span>
+      <span class="mono" style="font-size:12px;font-weight:900;color:${l.firm?'var(--miss)':'var(--muted)'}">+${l.onTable.toFixed(1)}</span>
+    </div>
+    <div class="bar"><i style="width:${Math.round(l.onTable/max*100)}%;background:${l.firm?'var(--miss)':'var(--faint)'}"></i></div>
+    <div class="tiny">${Math.round(l.pct*100)}% over ${l.n} targets${l.firm?'':' — not yet beyond doubt'}</div>
+  </div>`).join('');
+}
+
+/* ---------- presentation x distance heatmap ----------
+   Restored from v1. A cross-tab as a grid rather than a list: the eye finds the
+   cold corner far faster than it reads twelve bars. Empty cells stay EMPTY -
+   never zero - because "you have not shot that" and "you miss that" are
+   completely different facts. */
+function renderHeatmap(shots,career){
+  const withBoth=shots.filter(x=>x.pres&&x.dist);
+  if(withBoth.length<12)return '';
+  const cols=BANDS.filter(b=>withBoth.some(x=>x.dist===b));
+  const rows=[...new Set(withBoth.map(x=>x.pres))];
+  if(!cols.length||rows.length<2)return '';
+  const cellOf=(p,b)=>{
+    const arr=withBoth.filter(x=>x.pres===p&&x.dist===b);
+    if(!arr.length)return null;
+    const h=arr.filter(x=>x.res==='h').length;
+    return{pct:h/arr.length,n:arr.length};
+  };
+  const shade=c=>{
+    if(!c)return 'background:repeating-linear-gradient(45deg,var(--paper-2) 0 4px,transparent 4px 8px)';
+    const d=c.pct-career;                       // relative to YOUR average
+    const t=Math.max(-1,Math.min(1,d/0.25));
+    const col=t>=0?'31,138,76':'200,52,43';
+    return 'background:rgba('+col+','+(0.10+Math.abs(t)*0.55).toFixed(2)+')';
+  };
+  const rowTotals=rows.map(p=>{
+    const arr=withBoth.filter(x=>x.pres===p);
+    return{p,n:arr.length,pct:arr.filter(x=>x.res==='h').length/arr.length};
+  }).sort((a,b)=>a.pct-b.pct);
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:10px;min-width:260px">
+      <thead><tr>
+        <th style="text-align:left;padding:4px;font-size:9px;letter-spacing:.1em;color:var(--muted)">TARGET</th>
+        ${cols.map(c=>`<th style="padding:4px;font-size:9px;letter-spacing:.08em;color:var(--muted)">${esc(c.toUpperCase())}</th>`).join('')}
+        <th style="padding:4px;font-size:9px;color:var(--muted)">ALL</th>
+      </tr></thead>
+      <tbody>
+      ${rowTotals.map(rt=>`<tr>
+        <td style="padding:4px;font-weight:800;font-size:11px;white-space:nowrap">${esc(rt.p)}</td>
+        ${cols.map(c=>{const cl=cellOf(rt.p,c);
+          return `<td style="padding:0 2px"><div style="${shade(cl)};border-radius:5px;padding:7px 2px;text-align:center;font-weight:900;font-size:11px">
+            ${cl?Math.round(cl.pct*100)+'<span style="font-weight:600;opacity:.6;font-size:9px">/'+cl.n+'</span>':'<span style="opacity:.35">·</span>'}
+          </div></td>`}).join('')}
+        <td style="padding:4px;text-align:center;font-weight:900;font-size:11px;color:${pctCol(rt.pct)}">${Math.round(rt.pct*100)}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+  <div class="tiny" style="margin-top:6px">Green is above your ${Math.round(career*100)}% average, red below; the number after the slash is how many targets sit behind it. Hatched cells are combinations you have not shot — not zeros. Rows are ordered worst first.</div>`;
+}
+
+/* ---------- fatigue ----------
+   Restored from v1, at finer resolution. Hit rate by how far through the round
+   the target came. A real drop shows as a slope; concentration lapses show as a
+   dip in the middle. */
+function fatigueBuckets(shots,n){
+  const k=n||5;
+  const buckets=Array.from({length:k},()=>({hit:0,shot:0}));
+  shots.forEach(s=>{
+    if(!s.ofRound)return;
+    const i=Math.min(k-1,Math.floor(s.seq/s.ofRound*k));
+    buckets[i].shot++; if(s.res==='h')buckets[i].hit++;
+  });
+  return buckets.map((b,i)=>({i,...b,pct:b.shot?b.hit/b.shot:null}));
+}
+function renderFatigue(shots,career){
+  const b=fatigueBuckets(shots,5);
+  const usable=b.filter(x=>x.shot>=MIN_N);
+  if(usable.length<3)return '';
+  const W=320,H=96,P=8;
+  const x=i=>P+i*(W-2*P)/4;
+  const y=v=>H-P-((v-0)/1)*(H-2*P);
+  const pts=b.filter(x=>x.pct!=null);
+  const path=pts.map((p,i)=>(i?'L':'M')+x(p.i).toFixed(1)+' '+y(p.pct).toFixed(1)).join(' ');
+  const first=b[0],last=b[4];
+  let verdict;
+  if(first&&last&&first.shot>=MIN_N&&last.shot>=MIN_N){
+    const d=(first.pct-last.pct)*100;
+    verdict = d>=8 ? 'You finish '+Math.round(d)+' points below where you start. That is a real drop — worth looking at concentration, or food and water, over the back half.'
+      : d<=-8 ? 'You finish '+Math.round(-d)+' points ABOVE where you start — you are a slow starter rather than a fader. Worth more looking at the first stand.'
+      : 'Your first and last thirds are within '+Math.round(Math.abs(d))+' points of each other. No fade worth acting on.';
+  }else verdict='Not enough targets yet at both ends of a round to compare.';
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block">
+    <line x1="${P}" y1="${y(career)}" x2="${W-P}" y2="${y(career)}" stroke="var(--faint)" stroke-width="1" stroke-dasharray="4 3"/>
+    <path d="${path}" fill="none" stroke="var(--clay)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    ${b.map(p=>p.pct==null?'':`<circle cx="${x(p.i).toFixed(1)}" cy="${y(p.pct).toFixed(1)}" r="3.5"
+      fill="${p.pct>=career?'var(--hit)':'var(--miss)'}"/>`).join('')}
+  </svg>
+  <div class="tiny" style="display:flex;justify-content:space-between">
+    <span>Start of round</span><span>Middle</span><span>End</span>
+  </div>
+  <div class="muted" style="margin-top:8px">${esc(verdict)}</div>
+  <div class="tiny" style="margin-top:4px">${b.map(p=>p.shot?Math.round(p.pct*100)+'%':'—').join(' · ')} across the five fifths (${b.map(p=>p.shot).join('/')} targets).</div>`;
+}
+
 function vAnalysis(){
   const s=me(); if(!s)return vHome();
   const shots=allShots(s.id);
@@ -2332,14 +2527,77 @@ function vAnalysis(){
   const riv=rivalries(s.id);
   const tr=trophies(s.id);
 
+  /* ORDER OF THIS SCREEN, most useful first:
+       1. Form      - am I improving? the single question people open stats for
+       2. Priority  - the one thing worth working on, in targets not percentages
+       3. Heatmap   - where those targets are going
+       4. Fatigue   - when in the round they go
+       5. Why       - and for what stated reason
+     Everything after that is context: discipline detail, grounds, rivals, kit,
+     how far the diagnoses can be trusted, and the cabinet. */
+  const hist=roundHistory(s.id);
+  const best=hist.length?hist.reduce((a,b)=>b.pct>a.pct?b:a):null;
+  const last5=hist.slice(-5);
+  const recentPct=last5.length?Math.round(last5.reduce((a,b)=>a+b.pct,0)/last5.length):0;
+
   let out=`<div class="card ruled">
-    <h2 class="stencil">Career</h2>
+    <h2 class="stencil">Form</h2>
+    <div class="grid3" style="margin-bottom:4px">
+      <div class="stat"><b class="mono" style="color:${pctCol(recentPct/100)}">${recentPct}%</b><span>Last ${last5.length}</span></div>
+      <div class="stat"><b class="mono">${car}%</b><span>Career</span></div>
+      <div class="stat"><b class="mono" style="color:var(--clay)">${best?best.pct:0}%</b><span>Best</span></div>
+    </div>
+    ${renderForm(hist,car)}
+    <div class="divider"></div>
     <div class="grid3">
-      <div class="stat"><b class="mono" style="color:${pctCol(car/100)}">${car}%</b><span>Average</span></div>
+      <div class="stat"><b class="mono">${hist.length}</b><span>Rounds</span></div>
       <div class="stat"><b class="mono">${shots.length}</b><span>Targets</span></div>
       <div class="stat"><b class="mono">${misses.length}</b><span>Misses</span></div>
     </div>
   </div>`;
+
+  const leaders=lossLeaders(shots,car/100);
+  if(leaders.length)out+=`<div class="card">
+    <h2 class="stencil">Where the targets are going</h2>
+    <p class="tiny" style="margin-bottom:10px">Ranked by <b>targets on the table</b> — how many more you would have hit if that group matched your own ${car}% average. This is deliberately not a list of your worst percentages: a poor group you rarely meet costs you less than a middling one you meet constantly.</p>
+    ${renderLossLeaders(leaders,car/100)}
+    <div class="tiny">Red where the gap is beyond reasonable doubt for the number of targets behind it; grey where it is suggestive but not yet proven.</div>
+  </div>`;
+
+  if(db.mode==='pro'){
+    const hm=renderHeatmap(shots,car/100);
+    if(hm)out+=`<div class="card"><h2 class="stencil">Target × distance</h2>${hm}</div>`;
+  }
+  const ft=renderFatigue(shots,car/100);
+  if(ft)out+=`<div class="card"><h2 class="stencil">Through the round</h2>${ft}</div>`;
+
+
+
+
+  if(whys.length){
+    const dom=whys[0][1]/tagged.length;
+    out+=`<div class="card"><h2 class="stencil">Why you miss</h2>
+      ${whys.map(([w,n])=>`<div style="margin-bottom:9px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:800;margin-bottom:4px">
+          <span>${esc(w)}</span><span class="mono">${n} <span style="font-weight:600;color:var(--muted)">(${Math.round(n/tagged.length*100)}%)</span></span></div>
+        <div class="bar"><i style="width:${n/tagged.length*100}%"></i></div>
+      </div>`).join('')}
+      <div class="divider"></div>
+      ${tagged.length<8?`<div class="muted">Only ${tagged.length} diagnosed misses so far — too few to name a pattern. Tag a few more rounds and this will start telling you something.</div>`
+        :dom>=.4?`<div class="muted"><b>${esc(whys[0][0])}</b> accounts for ${Math.round(dom*100)}% of your diagnosed misses. ${esc(advice(whys[0][0]))}</div>`
+        :`<div class="muted">No single cause dominates — your misses are spread fairly evenly, which usually points at inconsistency rather than one fixable fault.</div>`}
+      ${(()=>{const cv=confidenceCaveat(s.id);return cv?`<div class="tiny" style="margin-top:8px;color:var(--miss)">${esc(cv)}</div>`:''})()}
+      ${misses.length-tagged.length>0?`<div class="tiny" style="margin-top:8px">${misses.length-tagged.length} miss${misses.length-tagged.length>1?'es are':' is'} untagged or unsure and excluded from this.</div>`:''}
+    </div>`;
+  }
+
+  if(db.mode==='pro'){
+    const plan=practicePlan(shots,car/100);
+    if(plan.length)out+=`<div class="card dark"><h2 class="stencil">Practice plan</h2>
+      ${plan.map((p,i)=>`<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--ink-3)">
+        <b style="color:var(--clay-2)">${i+1}</b><div><div style="font-weight:800;font-size:13px">${esc(p.t)}</div>
+        <div class="tiny" style="color:#8b97a6">${esc(p.d)}</div></div></div>`).join('')}</div>`;
+  }
 
   /* Sportrap analysis. The traps are the same five throughout a round and every
      shooter sees each one from all five stands, so a trap letter is a far
@@ -2371,23 +2629,6 @@ function vAnalysis(){
     out+=`<div class="card"><h2 class="stencil">By ground</h2>
       ${byGround.map(g=>barRow(g.k,g,car/100)).join('')}
       <div class="tiny">Black line = your career average. Bracket = the range your true ability plausibly sits in.</div>
-    </div>`;
-  }
-
-  if(whys.length){
-    const dom=whys[0][1]/tagged.length;
-    out+=`<div class="card"><h2 class="stencil">Why you miss</h2>
-      ${whys.map(([w,n])=>`<div style="margin-bottom:9px">
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:800;margin-bottom:4px">
-          <span>${esc(w)}</span><span class="mono">${n} <span style="font-weight:600;color:var(--muted)">(${Math.round(n/tagged.length*100)}%)</span></span></div>
-        <div class="bar"><i style="width:${n/tagged.length*100}%"></i></div>
-      </div>`).join('')}
-      <div class="divider"></div>
-      ${tagged.length<8?`<div class="muted">Only ${tagged.length} diagnosed misses so far — too few to name a pattern. Tag a few more rounds and this will start telling you something.</div>`
-        :dom>=.4?`<div class="muted"><b>${esc(whys[0][0])}</b> accounts for ${Math.round(dom*100)}% of your diagnosed misses. ${esc(advice(whys[0][0]))}</div>`
-        :`<div class="muted">No single cause dominates — your misses are spread fairly evenly, which usually points at inconsistency rather than one fixable fault.</div>`}
-      ${(()=>{const cv=confidenceCaveat(s.id);return cv?`<div class="tiny" style="margin-top:8px;color:var(--miss)">${esc(cv)}</div>`:''})()}
-      ${misses.length-tagged.length>0?`<div class="tiny" style="margin-top:8px">${misses.length-tagged.length} miss${misses.length-tagged.length>1?'es are':' is'} untagged or unsure and excluded from this.</div>`:''}
     </div>`;
   }
 
@@ -2428,11 +2669,6 @@ function vAnalysis(){
       </div>`}).join('')}
       <div class="tiny">Shots since last clean, against your interval. At least ${kit.reduce((a,g)=>a+(g.shots||0),0)} shots recorded across the armoury — a floor, not a tally, since second barrels aren't counted.</div>
     </div>`;
-    const plan=practicePlan(shots,car/100);
-    if(plan.length)out+=`<div class="card dark"><h2 class="stencil">Practice plan</h2>
-      ${plan.map((p,i)=>`<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--ink-3)">
-        <b style="color:var(--clay-2)">${i+1}</b><div><div style="font-weight:800;font-size:13px">${esc(p.t)}</div>
-        <div class="tiny" style="color:#8b97a6">${esc(p.d)}</div></div></div>`).join('')}</div>`;
   }
 
   if(db.mode==='pro'&&tagged.length>=5){
