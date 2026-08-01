@@ -223,6 +223,7 @@ function blank(){return{
   view:'home',
   seenTrophies:[],
   lastDiscipline:'sporting',
+  lastThrow:null,
   ssPick:null,
   goals:[],
   groundLocations:{},       // ground key -> {lat,lon} so a re-visit needs no GPS prompt
@@ -264,8 +265,34 @@ function newRound(){return{
    sometimes a single, occasionally three or four. So a stand defines `cycle`
    birds (A, B, C, D) and target i simply shows bird i % cycle. Tag A and B once
    and the rest of the stand inherits them; nothing is asked twice. */
+/* HOW the stand's targets are thrown. v1 had this as a pair type on every pair
+   group and v2 lost it, which left English Sporting silently treating every
+   stand as singles. It changes nothing about scoring - each clay is still one
+   result - but it is the difference between "I miss teal" and "I miss the second
+   bird of a simultaneous pair", which is a completely different fault. */
+var THROWS=[
+  {k:'single',   label:'Singles',            short:'Single', targets:1},
+  {k:'report',   label:'On report pair',     short:'Report', targets:2},
+  {k:'sim',      label:'Simultaneous pair',  short:'Sim',    targets:2},
+  {k:'following',label:'Following pair',     short:'Following',targets:2}
+];
+function throwOf(k){return THROWS.find(t=>t.k===k)||null;}
+function standThrow(st){return st&&st.throwType?throwOf(st.throwType):null;}
+/* Position within its pair, for a stand thrown as pairs: 0 = first bird,
+   1 = second. Singles and untyped stands return null. */
+function pairPos(st,i){
+  const t=standThrow(st);
+  if(!t||t.targets!==2)return null;
+  return i%2;
+}
+function throwLabel(st,i){
+  const t=standThrow(st);
+  if(!t)return null;
+  if(t.targets===1)return t.label;
+  return t.short+' pair · '+(pairPos(st,i)===0?'1st':'2nd');
+}
 function makeStand(n){
-  return {id:newId(),cycle:Math.min(2,n),birds:[],choke:null,
+  return {id:newId(),cycle:Math.min(2,n),birds:[],choke:null,throwType:null,
     slots:Array.from({length:n},()=>({id:newId(),pres:null,dist:null}))};
 }
 // Enough letters for every target on a stand to be a different bird. A stand of
@@ -899,7 +926,8 @@ function allShots(sh){
       discipline:r.discipline||'sporting',
       trap:isMenuFormat(r)?(sl.trap||null):null,
       standTrap:isSuperSporting(r)&&sl.trap?('S'+(st.index+1)+' '+sl.trap):null,
-      element:isSuperSporting(r)?ssElement(sl.element).label
+      element:(r.discipline||'sporting')==='sporting'?(standThrow(st)?standThrow(st).label:null)
+        :isSuperSporting(r)?ssElement(sl.element).label
         :isABT(r)?'Single'
         :isSkeet(r)?(sl.element==='option'?'Option':(sl.element==='single'?'Single':'Double'))
         :isMenuFormat(r)?elementShort(st,sl):null,
@@ -908,6 +936,7 @@ function allShots(sh){
         :isSuperSporting(r)?(st.index+1)
         :isMenuFormat(r)?((st.index%cageCount(r))+1):null,
       pres:presFor(st,i),dist:distFor(st,i),clay:clayFor(st,i),
+      pairPos:pairPos(st,i),
       wind:roundBand(r,'windBand'),light:roundBand(r,'lightBand'),
       choke:st.choke||null,
       gun:r.gunId?gunLabel(gunById(r.gunId)):null,
@@ -1175,7 +1204,7 @@ function roundSheet(id){
       return `<div style="display:flex;gap:9px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--rule)">
         <div style="font-weight:900;font-size:13px;flex:0 0 58px">Stand ${i+1}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:12px;font-weight:800">${esc(standSize(st))}</div>
+          <div style="font-size:12px;font-weight:800">${esc(standSize(st))}${standThrow(st)?' · '+esc(standThrow(st).label):''}</div>
           ${birds.length?`<div class="tiny">${esc(birds.join(' · '))}</div>`:''}
           ${st.choke?`<div class="tiny">Choke ${esc(st.choke)}</div>`:''}
         </div>
@@ -1203,7 +1232,8 @@ function vSetup(){
   if(db.live){db.view='capture';return vCapture();}
   if(!draft)draft={ground:'',ids:me()?[me().id]:[],stands:8,per:4,counts:{},
     gunId:db.defaultGunId,cartridgeId:db.defaultCartridgeId,
-    discipline:db.lastDiscipline||'sporting',layouts:1,cages:SR_STANDS,ssTraps:SS_MIN_TRAPS};
+    discipline:db.lastDiscipline||'sporting',layouts:1,cages:SR_STANDS,ssTraps:SS_MIN_TRAPS,
+    throwType:db.lastThrow||null};
   const b=me()?briefing(draft.ground,me().id):null;
 
   const disc=draft.discipline||'sporting';
@@ -1282,7 +1312,12 @@ function vSetup(){
       <div><label class="lbl">Stands</label>${numPicker(1,10,draft.stands,'draft.stands')}</div>
       <div><label class="lbl">Targets per stand</label>${numPicker(1,10,draft.per,'draft.per')}</div>
     </div>
-    <div class="tiny" style="margin-top:8px">${draft.stands*draft.per} targets${draft.per%2===0?' · '+(draft.per/2)+' pairs per stand':''}. Need more than 10 stands, or a stand with more targets than the rest? Add them from the Stand menu once you have started.</div>
+    <label class="lbl" style="margin-top:12px">How are they usually thrown here?</label>
+    <div style="display:flex;flex-wrap:wrap;gap:5px">
+      ${THROWS.map(t=>`<button class="chip ${draft.throwType===t.k?'clay':''}" style="padding:11px 12px"
+        onclick="draft.throwType=(draft.throwType==='${t.k}'?null:'${t.k}');render()">${esc(t.label)}</button>`).join('')}
+    </div>
+    <div class="tiny" style="margin-top:8px">${draft.stands*draft.per} targets${draft.per%2===0?' · '+(draft.per/2)+' pairs per stand':''}. Sets every stand to start with; change any stand as you reach it. Need more than 10 stands, or a stand with more targets than the rest? Add them from the Stand menu once you have started.</div>
   </div>`}
 
   ${db.mode==='pro'?kitCard():''}
@@ -1395,7 +1430,12 @@ function beginRound(){
     r.activeStand=first?first.standIndex:0;
   }else{
     r.limits={}; draft.ids.forEach(id=>r.limits[id]=draft.counts[id]||draft.stands*draft.per);
-    for(let i=0;i<draft.stands;i++)r.stands.push(makeStand(draft.per));
+    db.lastThrow=draft.throwType||null;
+    for(let i=0;i<draft.stands;i++){
+      const ns=makeStand(draft.per);
+      ns.throwType=draft.throwType||null;
+      r.stands.push(ns);
+    }
     r.activeShooter=r.shooterIds[0];
   }
   db.live=r;db.view='capture';draft=null;save();render();
@@ -1469,6 +1509,30 @@ function advance(r){
   }
   return advanceSporting(r);
 }
+/* Shooting order for the stand currently in front of us.
+
+   As in v1: the squad is drawn once at the start, and THE LEAD ROTATES ON EACH
+   STAND, so the same person is not always first up. Stand 1 leads with shooter
+   1, stand 2 with shooter 2, and so on round the squad. */
+function sportingOrder(r,standIdx){
+  const n=r.shooterIds.length;
+  if(!n)return [];
+  const lead=((standIdx==null?r.activeStand:standIdx)%n+n)%n;
+  const out=[];
+  for(let i=0;i<n;i++)out.push(r.shooterIds[(i+lead)%n]);
+  return out;
+}
+// this shooter's next unscored target on a given stand, ignoring the cursor
+function nextSlotOnStand(r,sh,st){
+  if(!st)return null;
+  for(const sl of st.slots){const c=r.scores[sh]&&r.scores[sh][sl.id];if(!c||!c.r)return sl;}
+  return null;
+}
+function standPosition(r,sh){
+  const o=sportingOrder(r);
+  const i=o.indexOf(sh);
+  return i<0?null:{pos:i+1,of:o.length};
+}
 function advanceSporting(r){
   /* Super Sporting stands start empty until their menu is copied off the board,
      so an empty stand is 'not yet defined' rather than 'finished'. Stop on it
@@ -1477,15 +1541,30 @@ function advanceSporting(r){
     const cur=r.stands[r.activeStand];
     if(cur&&!cur.slots.length)return;
   }
-  // move to next shooter on this stand who still has targets; else next stand
-  const order=r.shooterIds.filter(id=>!done(r,id));
+  const st=r.stands[r.activeStand];
+  const order=sportingOrder(r);
   if(!order.length)return;
-  const start=order.indexOf(r.activeShooter);
-  for(let k=1;k<=order.length;k++){
-    const id=order[(Math.max(start,0)+k)%order.length];
-    if(nextSlot(r,id)){r.activeShooter=id;return;}
+
+  /* A SHOOTER COMPLETES THE WHOLE STAND BEFORE THE NEXT ONE STEPS IN.
+
+     v2 originally rotated after every single target, which meant a simultaneous
+     pair was scored as "everyone shoots the first bird, then everyone shoots the
+     second" - not how anyone shoots. You take your pair, then your next pair,
+     until your card for that stand is done, then the next gun goes. */
+  if(st){
+    if(!done(r,r.activeShooter)&&nextSlotOnStand(r,r.activeShooter,st))return;   // still your turn
+    const ci=order.indexOf(r.activeShooter);
+    for(let k=1;k<=order.length;k++){
+      const id=order[(Math.max(ci,0)+k)%order.length];
+      if(!done(r,id)&&nextSlotOnStand(r,id,st)){r.activeShooter=id;return;}
+    }
   }
-  if(r.activeStand<r.stands.length-1){r.activeStand++;r.activeShooter=order[0];}
+  // stand finished by everyone - move on, and the lead rotates with the stand
+  if(r.activeStand<r.stands.length-1){
+    r.activeStand++;
+    const next=sportingOrder(r);
+    r.activeShooter=next.find(id=>!done(r,id))||next[0];
+  }
 }
 function vCapture(){
   const r=db.live; if(!r){db.view='home';return vHome();}
@@ -1525,6 +1604,8 @@ function vCapture(){
   const pips=st.slots.map((sl,i)=>{
     const c=r.scores[sh]?.[sl.id];
     const cls=c&&c.r==='h'?'h':c&&c.r==='m'?'m':'';
+    const pp=(r.discipline||'sporting')==='sporting'?pairPos(st,i):null;
+    const pairEdge=pp===1?'margin-right:9px':'';
     const lab=isSuperSporting(r)?(sl.trap||'·')
       :isABT(r)?(i+1)
       :isSkeet(r)?((skeetHouse(r,st,sl,sh)||'?')==='high'?'H':(skeetHouse(r,st,sl,sh)==='low'?'L':'?'))
@@ -1532,14 +1613,15 @@ function vCapture(){
     const cur=sl.id===slot.id?'cur':'';
     // a recorded miss stays tappable, so an earlier one can be diagnosed later
     if(c&&c.r==='m')
-      return `<button class="pip m ${cur}" style="${c.whyAuto?'box-shadow:inset 0 0 0 2px rgba(255,255,255,.55)':''}"
+      return `<button class="pip m ${cur}" style="${pairEdge};${c.whyAuto?'box-shadow:inset 0 0 0 2px rgba(255,255,255,.55)':''}"
         title="${attrStrSafe(c.why)}" onclick="openMissReason('${sh}','${sl.id}')">${lab}</button>`;
-    return `<div class="pip ${cls} ${cur}">${lab}</div>`;
+    return `<div class="pip ${cls} ${cur}" style="${pairEdge}">${lab}</div>`;
   }).join('');
   const curPres=db.mode==='pro'?presFor(st,slotIndex):null;
+  const thLab=throwLabel(st,slotIndex);
   let tgtLabel=db.mode==='pro'
-    ? `Target ${idx} · ${LETTER[birdIdx(st,slotIndex)]}${curPres?' '+curPres:''}`
-    : `Target ${idx}`;
+    ? `Target ${idx} · ${LETTER[birdIdx(st,slotIndex)]}${curPres?' '+curPres:''}${thLab?' · '+thLab:''}`
+    : `Target ${idx}${thLab&&standThrow(st)&&standThrow(st).targets===2?' · '+thLab:''}`;
   if(isMenuFormat(r))tgtLabel=elementShort(st,slot)+(slot.trap?' · trap '+slot.trap:'');
   if(isSkeet(r))tgtLabel=slot.element==='option'?'Option — 25th':skeetLabel(r,st,slot,sh);
   if(isABT(r))tgtLabel='Station '+st.station;
@@ -1559,6 +1641,8 @@ function vCapture(){
           ? 'Stand '+((r.activeStand%cageCount(r))+1)+(r.layouts>1?' · layout '+(Math.floor(r.activeStand/cageCount(r))+1)+' of '+r.layouts:'')+' · '+esc(elementLabel(st,slot))
           : 'Stand '+(r.activeStand+1)+' of '+r.stands.length+' · '+esc(standSize(st))}</div>
         <div class="tgt-num">${esc(shooter(sh).name)}</div>
+        ${(()=>{const sp=(r.discipline||'sporting')==='sporting'||isSuperSporting(r)?standPosition(r,sh):null;
+          return sp&&sp.of>1?`<div class="tiny">${sp.pos===1?'First':sp.pos===2?'Second':sp.pos===3?'Third':sp.pos+'th'} up on this stand · shoots the whole stand before the next gun</div>`:''})()}
       </div>
       <div style="text-align:right">
         <div class="mono" style="font-size:22px;font-weight:900">${total.hit}/${total.shot}</div>
@@ -1567,7 +1651,7 @@ function vCapture(){
     </div>
 
     ${r.shooterIds.length>1?`<div class="who" style="margin:10px 0">
-      ${r.shooterIds.map(id=>{const s2=roundStats(r,id);
+      ${(((r.discipline||'sporting')==='sporting'||isSuperSporting(r))?sportingOrder(r):r.shooterIds).map(id=>{const s2=roundStats(r,id);
         return `<button class="chip ${id===sh?'clay':''}" onclick="pickShooter('${id}')">${esc(shooter(id).name)} ${s2.hit}/${s2.shot}</button>`}).join('')}
     </div>`:'<div style="height:6px"></div>'}
 
@@ -1807,9 +1891,20 @@ function birdPanel(st,slotIndex){
   const missing=birds.filter(b=>!b.pres);
   const editing=st.editBird!=null?st.editBird:(missing.length?cur:null);
 
+  const th=standThrow(st);
   return `<div class="card">
-    <h2 class="stencil">This stand's birds</h2>
+    <h2 class="stencil">This stand</h2>
 
+    <label class="lbl">How are they thrown?</label>
+    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:${th?'10px':'6px'}">
+      ${THROWS.map(t=>`<button class="chip ${st.throwType===t.k?'clay':''}" style="padding:11px 12px"
+        onclick="setThrow('${t.k}')">${esc(t.label)}</button>`).join('')}
+    </div>
+    ${th?`<div class="tiny" style="margin-bottom:10px">${st.slots.length} target${st.slots.length===1?'':'s'}${
+      th.targets===2?' — '+Math.floor(st.slots.length/2)+' '+esc(th.label.toLowerCase())+(st.slots.length%2?' plus an odd single':''):''}.</div>`
+      :`<div class="tiny" style="margin-bottom:10px;color:var(--clay)">Not set. Scoring works either way, but without this the app cannot tell a missed second barrel of a pair from a missed single — and those are different faults.</div>`}
+
+    <label class="lbl">Birds</label>
     <div class="who" style="margin-bottom:10px">
       ${birds.map(b=>`<button class="chip ${b.i===cur?'clay':b.pres?'on':''}" onclick="editBird(${b.i})">
         ${LETTER[b.i]} · ${b.pres?esc(b.pres):'set'}${b.dist?' · '+esc(b.dist):''}</button>`).join('')}
@@ -1836,6 +1931,11 @@ function birdPanel(st,slotIndex){
       ${st.editBird!=null?`<button class="btn ghost sm" style="width:100%;margin-top:8px" onclick="editBird(null)">Done</button>`:''}
     `:`<div class="tiny">All ${cyc} bird${cyc>1?'s':''} tagged — nothing more to enter until the next stand. Tap a letter above to change one.</div>`}
   </div>`;
+}
+function setThrow(k){
+  const r=db.live,st=r.stands[r.activeStand]; if(!st)return;
+  st.throwType=(st.throwType===k)?null:k;
+  saveRound(r);render();
 }
 function editBird(i){const st=db.live.stands[db.live.activeStand];st.editBird=i;saveRound(db.live);render();}
 function chooseBird(i,v){
@@ -1980,7 +2080,15 @@ function undo(){
   r.stands.forEach((st,i)=>{if(st.slots.some(s=>s.id===la.slot))r.activeStand=i;});
   r.lastAction=null;saveRound(r);render();
 }
-function pickShooter(id){const r=db.live;if(done(r,id)){notice('Finished','That shooter has completed their targets.');return;}r.editMiss=null;r.activeShooter=id;saveRound(r);render();}
+function pickShooter(id){
+  const r=db.live;
+  if(done(r,id)){notice('Finished','That shooter has completed their targets.');return;}
+  if(((r.discipline||'sporting')==='sporting'||isSuperSporting(r))&&!nextSlotOnStand(r,id,r.stands[r.activeStand])){
+    notice('Stand complete',shooter(id).name+' has already shot this stand. Move to the next stand, or pick someone who still has targets here.');
+    return;
+  }
+  r.editMiss=null;r.activeShooter=id;saveRound(r);render();
+}
 function standSheet(){
   const r=db.live;
   if(isSuperSporting(r)){
@@ -2031,6 +2139,10 @@ function standSheet(){
         onclick="setStandTargets(${n})">${n}</button>`).join('')}
     </div>
     <div class="tiny" style="margin-bottom:10px">${r.stands[r.activeStand].slots.length} now${r.stands[r.activeStand].slots.length%2===0?' — '+(r.stands[r.activeStand].slots.length/2)+' pairs':''}. Reducing this deletes any scores on the targets removed.</div>
+    <label class="lbl">How they're thrown</label>
+    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">
+      ${THROWS.map(t=>`<button class="chip ${r.stands[r.activeStand].throwType===t.k?'clay':''}" onclick="setThrow('${t.k}')">${esc(t.label)}</button>`).join('')}
+    </div>
     <button class="btn ghost" style="margin-bottom:8px" onclick="addStand()">Add a stand</button>
     <button class="btn ghost" style="margin-bottom:8px" onclick="addTarget()">Add one more target</button>
     <button class="btn ghost" style="margin-bottom:8px" onclick="dropStand()">Remove this stand</button>
@@ -2047,8 +2159,16 @@ function setChoke(c){
   st.choke=c||null;saveRound(r);standSheet();render();
 }
 function addStand(){const r=db.live;
-  r.stands.push(isSuperSporting(r)?makeSSStand(r.stands.length,r.stands[0]?ssTraps(r.stands[0]).length:SS_MIN_TRAPS)
-    :makeStand(r.stands[0]?.slots.length||4));
+  if(isSuperSporting(r)){
+    r.stands.push(makeSSStand(r.stands.length,r.stands[0]?ssTraps(r.stands[0]).length:SS_MIN_TRAPS));
+  }else{
+    const ns=makeStand(r.stands[0]?.slots.length||4);
+    // carry the previous stand's throw type forward - a ground that sets sim
+    // pairs on one stand usually sets them on the next, and it is one less tap
+    const prev=r.stands[r.stands.length-1];
+    if(prev&&prev.throwType)ns.throwType=prev.throwType;
+    r.stands.push(ns);
+  }
   saveRound(r);closeSheet();render();}
 function addTarget(){const r=db.live;r.stands[r.activeStand].slots.push({id:newId(),pres:null,dist:null});saveRound(r);standSheet();render();}
 /* Set a stand's target count outright. Growing just appends; shrinking removes
@@ -2404,12 +2524,18 @@ function renderScoreboard(r,opts){
   return `<div class="card" style="margin-top:12px">
     <h2 class="stencil">${o.title||'Scoreboard'}</h2>
 
-    ${ids.length>1?`<div class="lbl" style="margin-bottom:6px">Shooting order</div>
-      <div class="who" style="margin-bottom:10px">
-        ${ids.map((id,i)=>`<button class="chip ${id===r.activeShooter&&!o.final?'clay':''}"
+    ${ids.length>1?(()=>{
+      const rot=((r.discipline||'sporting')==='sporting'||isSuperSporting(r))&&!o.final
+        ? sportingOrder(r) : ids;
+      return `<div class="lbl" style="margin-bottom:6px">Shooting order${
+        (!o.final&&((r.discipline||'sporting')==='sporting'||isSuperSporting(r)))?' · stand '+(r.activeStand+1):''}</div>
+      <div class="who" style="margin-bottom:6px">
+        ${rot.map((id,i)=>`<button class="chip ${id===r.activeShooter&&!o.final?'clay':''}"
           onclick="pickShooter('${id}')">
           <span style="opacity:.6">${i+1}</span> ${esc(shooter(id).name)}</button>`).join('')}
-      </div>`:''}
+      </div>
+      ${!o.final&&((r.discipline||'sporting')==='sporting'||isSuperSporting(r))?`<div class="tiny" style="margin-bottom:10px">The lead rotates each stand, so nobody is always first up.</div>`:'<div style="height:4px"></div>'}`;
+    })():''}
 
     <div data-hscroll="scoreboard" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
       <table style="border-collapse:collapse;font-size:11px;width:100%;min-width:${90+ids.length*54}px">
@@ -2893,6 +3019,17 @@ function vAnalysis(){
     const byPres=breakdown(shots,x=>x.pres);
     if(byPres.length)out+=`<div class="card"><h2 class="stencil">By presentation</h2>
       ${byPres.map(p=>barRow(p.k,p,car/100)).join('')}</div>`;
+
+    /* First bird versus second of a pair is one of the more useful splits in
+       Sporting, and impossible to see without the throw type. */
+    const byThrow=breakdown(shots,x=>x.element);
+    if(byThrow.length)out+=`<div class="card"><h2 class="stencil">By target type</h2>
+      ${byThrow.map(t=>barRow(t.k,t,car/100)).join('')}
+      ${(()=>{const bp=breakdown(shots.filter(x=>x.pairPos!==null&&x.pairPos!==undefined),
+          x=>x.pairPos===0?'First bird of the pair':'Second bird of the pair');
+        return bp.length===2?`<div class="lbl" style="margin:12px 0 6px">Within a pair</div>${bp.map(t=>barRow(t.k,t,car/100)).join('')}
+          <div class="tiny">A gap here usually means time and rhythm rather than the target itself.</div>`:''})()}
+    </div>`;
 
     const byClay=breakdown(shots,x=>x.clay);
     if(byClay.length)out+=`<div class="card"><h2 class="stencil">By clay type</h2>
@@ -3541,7 +3678,7 @@ function encodeRound(r){
         return encField(b.pres)+'~'+encField(b.dist);
       }).join(',');
     }
-    return st.slots.length+':'+cyc+':'+encField(st.choke)+':'+birds;
+    return st.slots.length+':'+cyc+':'+encField(st.choke)+':'+birds+':'+encField(st.throwType);
   }).join(';');
   const names=ids.map(id=>encField(shooter(id).name)).join(',');
   const scores=ids.map(id=>{
@@ -3596,6 +3733,7 @@ function decodeRound(text){
       return{pres:safeLabel(parts[0]),dist:safeLabel(parts[1])};
     });
     stands.push({id:newId(),cycle:cyc,birds:birds,
+      throwType:(function(){const t=safeLabel(bits[4]);return throwOf(t)?t:null;})(),
       choke:safeLabel(bits[2]),
       slots:Array.from({length:n},()=>({id:newId(),pres:null,dist:null}))});
     total+=n;
