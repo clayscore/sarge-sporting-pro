@@ -6,7 +6,7 @@
 <title>Clayscore</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#12161d">
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest2.json">
 <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
 <style>
 /* =============================================================================
@@ -206,6 +206,10 @@ nav svg{width:19px;height:19px}
    syncing individual round documents - no rewrite, and no last-write-wins over a
    single giant blob (the trap flagged in the Firebase note).
 ============================================================================= */
+/* Bumped with every release and shown in Settings. Must match the service
+   worker cache name - a test asserts it does - so "which build am I on?" has an
+   answer without opening developer tools. */
+var APP_VERSION='v48';
 const KEY='clayscore_v2';
 let uid=0; const newId=()=>Date.now().toString(36)+(uid++).toString(36);
 var REASONS=['Behind','In front','Above','Below',"Didn't mount",'Lost it','Unsure'];
@@ -1076,6 +1080,12 @@ const ICONS={
 };
 const svgi=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
 
+// The build tag sits at the foot of every screen. It exists so that when a fix
+// looks missing we can settle in one glance whether the phone is running the
+// build that contains it, rather than guessing.
+function buildTag(){
+  return `<div class="tiny" id="buildtag" style="margin-top:auto;text-align:center;opacity:.5;padding-top:8px">Clayscore ${esc(APP_VERSION)}</div>`;
+}
 function render(){
   document.body.classList.toggle('dark',!!db.dark);
   document.body.classList.toggle('glove',!!db.glove);
@@ -1085,7 +1095,7 @@ function render(){
   keepScrolls();          // the scoreboard is the one thing that scrolls sideways
   const v={home:vHome,setup:vSetup,capture:vCapture,enrich:vEnrich,analysis:vAnalysis,
     settings:vSettings,check:vCheck}[db.view]||vHome;
-  m.innerHTML=v();
+  m.innerHTML=v()+buildTag();
   const nav=document.getElementById('nav');
   const items=[['home','Home','home'],['setup','Shoot','play'],['analysis','Stats','chart'],['settings','Setup','cog']];
   nav.innerHTML=items.map(([k,l,i])=>{
@@ -1310,14 +1320,19 @@ function vSetup(){
     <h2 class="stencil">Layout</h2>
     <div class="grid2">
       <div><label class="lbl">Stands</label>${numPicker(1,10,draft.stands,'draft.stands')}</div>
-      <div><label class="lbl">Targets per stand</label>${numPicker(1,10,draft.per,'draft.per')}</div>
+      <div><label class="lbl">${(draft.throwType==='single')?'Singles per stand':'Pairs per stand'}</label>
+        ${(draft.throwType==='single')
+          ? numPicker(1,10,draft.per,'draft.per')
+          : numPicker(1,5,Math.max(1,Math.round(draft.per/2)),'draft.pairs')}</div>
     </div>
     <label class="lbl" style="margin-top:12px">How are they usually thrown here?</label>
     <div style="display:flex;flex-wrap:wrap;gap:5px">
       ${THROWS.map(t=>`<button class="chip ${draft.throwType===t.k?'clay':''}" style="padding:11px 12px"
-        onclick="draft.throwType=(draft.throwType==='${t.k}'?null:'${t.k}');render()">${esc(t.label)}</button>`).join('')}
+        onclick="setDraftThrow('${t.k}')">${esc(t.label)}</button>`).join('')}
     </div>
-    <div class="tiny" style="margin-top:8px">${draft.stands*draft.per} targets${draft.per%2===0?' · '+(draft.per/2)+' pairs per stand':''}. Sets every stand to start with; change any stand as you reach it. Need more than 10 stands, or a stand with more targets than the rest? Add them from the Stand menu once you have started.</div>
+    <div class="tiny" style="margin-top:8px">${draft.stands*draft.per} targets — ${draft.stands} stand${draft.stands===1?'':'s'} of ${
+      (draft.throwType==='single')?draft.per+' single'+(draft.per===1?'':'s')
+      :(draft.per/2)+' pair'+(draft.per===2?'':'s')+' ('+draft.per+' clays)'}. Sets every stand to start with; change any stand as you reach it. Need more than 10 stands, or a stand with more targets than the rest? Add them from the Stand menu once you have started.</div>
   </div>`}
 
   ${db.mode==='pro'?kitCard():''}
@@ -1328,10 +1343,24 @@ function vSetup(){
    phone summons the keyboard over the form and needs a confirm; tapping does not. */
 function numPicker(lo,hi,cur,target){
   const opts=[];for(let i=lo;i<=hi;i++)opts.push(i);
+  /* `draft.pairs` is a view onto `draft.per`: a shooter walking up to a stand
+     counts pairs, not clays, so that is what the app asks for. The stored value
+     stays in targets because that is what a stand is actually made of. */
+  const set=target==='draft.pairs'?'setDraftPairs':null;
   return `<div style="display:flex;flex-wrap:wrap;gap:5px">
     ${opts.map(n=>`<button class="chip ${cur===n?'clay':''}" style="padding:12px 0;min-width:40px;font-size:14px;text-align:center"
-      onclick="${target}=${n};render()">${n}</button>`).join('')}
+      onclick="${set?set+'('+n+')':target+'='+n+';render()'}">${n}</button>`).join('')}
   </div>`;
+}
+function setDraftPairs(n){ draft.per=Math.max(2,n*2); render(); }
+/* Switching to singles keeps the clay count sensible rather than halving the
+   card without telling anyone. */
+function setDraftThrow(k){
+  const was=draft.throwType;
+  draft.throwType=(was===k?null:k);
+  if(draft.throwType==='single'&&was!=='single'&&draft.per%2===0)draft.per=Math.max(1,draft.per);
+  if(was==='single'&&draft.throwType&&draft.throwType!=='single'&&draft.per%2)draft.per=draft.per+1;
+  render();
 }
 function kitCard(){
   const due=gunsDue();
@@ -2132,13 +2161,14 @@ function standSheet(){
   }
   sheet(`<h3>Stand ${r.activeStand+1}</h3>
     <p class="muted" style="margin:6px 0 14px">Adjust the layout mid-round if the ground differs from what you set up.</p>
-    <label class="lbl">Targets on this stand</label>
+    <label class="lbl">Pairs on this stand</label>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
-      ${[2,4,6,8,10,12].map(n=>`<button class="chip ${r.stands[r.activeStand].slots.length===n?'clay':''}"
-        style="padding:16px 0;min-width:46px;font-size:17px;font-weight:900;text-align:center"
-        onclick="setStandTargets(${n})">${n}</button>`).join('')}
+      ${[1,2,3,4,5,6].map(pr=>`<button class="chip ${r.stands[r.activeStand].slots.length===pr*2?'clay':''}"
+        style="padding:14px 0;min-width:46px;font-size:15px;font-weight:900;text-align:center;line-height:1.15"
+        onclick="setStandTargets(${pr*2})">${pr}<div style="font-size:8px;font-weight:700;opacity:.65">pair${pr===1?'':'s'}</div></button>`).join('')}
     </div>
-    <div class="tiny" style="margin-bottom:10px">${r.stands[r.activeStand].slots.length} now${r.stands[r.activeStand].slots.length%2===0?' — '+(r.stands[r.activeStand].slots.length/2)+' pairs':''}. Reducing this deletes any scores on the targets removed.</div>
+    <div class="tiny" style="margin-bottom:10px">${(()=>{const n=r.stands[r.activeStand].slots.length;
+      return n%2===0?(n/2)+' pair'+(n===2?'':'s')+' ('+n+' clays)':n+' clays';})()} on this stand. Reducing this deletes any scores on the targets removed.</div>
     <label class="lbl">How they're thrown</label>
     <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">
       ${THROWS.map(t=>`<button class="chip ${r.stands[r.activeStand].throwType===t.k?'clay':''}" onclick="setThrow('${t.k}')">${esc(t.label)}</button>`).join('')}
@@ -3325,7 +3355,8 @@ function vSettings(){
     <button class="btn ghost" style="color:var(--miss);border-color:var(--miss)" onclick="eraseAllPrompt()">Erase all data</button>
   </div>
 
-  <div class="tiny" style="text-align:center;padding:6px 0 10px">Clayscore v2 · works fully offline</div>`;
+  <div class="tiny" style="text-align:center;padding:6px 0 10px">Clayscore <b>${esc(APP_VERSION)}</b> · works fully offline<br>
+    If a fix seems missing, check this matches the build you uploaded.</div>`;
 }
 function renameShooter(id,v){const s=db.shooters.find(x=>x.id===id);if(s){s.name=(v||'').trim()||s.name;save();render();}}
 function setMe(id){db.shooters.forEach(s=>s.me=s.id===id);save();render();}
@@ -4311,7 +4342,7 @@ function boot(){
   if(db.view==='setup'&&!db.live)draft=null;
   render();
   if(db.view==='settings')storageInfo();
-  if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+  if('serviceWorker' in navigator){navigator.serviceWorker.register('sw2.js').catch(()=>{});}
 }
 if(typeof window!=='undefined'){window.onload=boot;}
 </script>
