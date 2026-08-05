@@ -1,10 +1,9 @@
-const CACHE_NAME = 'clayscore-v46';
+const CACHE_NAME = 'clayscore2-v48';
 // v2 has no CSS/icon/JS framework dependencies - the only external asset is
 // html2canvas for the share card, and the app degrades gracefully without it.
 const ASSETS = [
-  './',
-  './index.html',
-  './manifest.json',
+  './clayscore2.html',
+  './manifest2.json',
   './icon-192.png',
   './icon-512.png',
   'https://html2canvas.hertzen.com/dist/html2canvas.min.js'
